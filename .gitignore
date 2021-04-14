@@ -1,0 +1,33 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[co]
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*~
+.settings
+
+# Eclipse
+.project
+.pydevproject
+
+# pycharm
+.idea
+# spyder
+.spyproject
+# Visual Studio
+*.pyproj
+#log
+*.log
