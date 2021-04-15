@@ -7,8 +7,8 @@ Created on Tue Feb  9 09:56:15 2021
 import os.path as osp
 import time
 from openpyxl import Workbook, load_workbook
-from rotating_platform import RotatingPlatform
-from pychariot import Chariot, CHR_OK
+# from rotating_platform import RotatingPlatform
+from pychariot import Chariot, RetureCode
 import configuration as config
 
 
@@ -142,13 +142,14 @@ def main():
     init_xlsx()
     api = Chariot()
     ret = api.api_initialize()
-    if not ret == CHR_OK:
+    if not ret == RetureCode.CHR_OK:
         raise RuntimeError('Chariot api initialize error.')
     ret = api.api_get_version()
+    print('chrapi version:{}'.format(ret))
     tx_test = create_test(api)
     rx_test = copy_swap_pairs_test(api, tx_test)
     result_info = init_xlsx()
-    device = RotatingPlatform(config.rotating_platform)
+    # device = RotatingPlatform(config.rotating_platform)
     wb = result_info.get('workbook')
     result_path = result_info.get('path')
     tx_rows = result_info.get('tx_rows')
@@ -159,7 +160,7 @@ def main():
     rx_ws = result_info.get('rx_ws')
     for angle in config.rotation_angle:
         print('-测试转台角度：{}'.format(angle))
-        rotation(device, angle)
+        # rotation(device, angle)
         print('--测试TX')
         ret = run_test_result(api, tx_test, WAIT_TIME)
         tx_ws.cell(row=tx_rows.get(angle), column=tx_col).value = round(ret, 3)

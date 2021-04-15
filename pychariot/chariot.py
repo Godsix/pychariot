@@ -10,16 +10,10 @@ from platform import architecture
 from functools import lru_cache
 from winreg import (HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY, KEY_READ,
                     OpenKey, QueryValueEx)
-
-from .chrapi_constant import (CHR_DETAIL_LEVEL_ALL, CHR_OK, CHR_NULL_HANDLE,
-                              CHR_OPERATION_FAILED, CHR_OBJECT_INVALID,
-                              CHR_APP_GROUP_INVALID, CHR_FALSE, CHR_TRUE,
-                              CHR_TIMED_OUT, CHR_PROTOCOL_TCP,
-                              CHR_TEST_END_AFTER_FIXED_DURATION,
-                              CHR_RESULTS_THROUGHPUT)
+from .const import CHR_DETAIL_LEVEL, RetureCode, CHR_NULL_HANDLE, CHR_BOOLEAN
 
 
-CHARIOT_VERSION = (0, 1, 2)
+CHARIOT_VERSION = (0, 2, 0)
 
 
 def chr_api_wrapper(self, func):
@@ -32,7 +26,7 @@ def chr_api_wrapper(self, func):
         else:
             rc = ret
             out = None
-        if rc != CHR_OK:
+        if rc != RetureCode.CHR_OK:
             func_name = func.__name__
             api_name = func_name[4:]
             if not api_name.startswith('api'):
@@ -74,8 +68,9 @@ class Chariot:
         self.logger = PrintLogger()
         self.pairs = []
 
-    def get_ixchariot_path(self):
-        for reg_key in self.REG_KEYS:
+    @classmethod
+    def get_ixchariot_path(cls):
+        for reg_key in cls.REG_KEYS:
             try:
                 with OpenKey(HKEY_LOCAL_MACHINE, reg_key,
                              access=KEY_READ | KEY_WOW64_32KEY) as key:
@@ -85,17 +80,26 @@ class Chariot:
                 pass
         return None
 
-    def get_chrapi_dir(self, path=None):
-        if path and osp.exists(osp.join(path, self.APINAME)):
+    @classmethod
+    def get_chrapi_dir(cls, path=None):
+        if path and osp.exists(osp.join(path, cls.APINAME)):
             return path
         for item in os.environ.get('PATH').split(';'):
-            if item and osp.exists(osp.join(item, self.APINAME)):
+            if item and osp.exists(osp.join(item, cls.APINAME)):
                 return item
         else:
-            ixia_path = self.get_ixchariot_path()
-            if ixia_path and osp.exists(osp.join(ixia_path, self.APINAME)):
+            ixia_path = cls.get_ixchariot_path()
+            if ixia_path and osp.exists(osp.join(ixia_path, cls.APINAME)):
                 return ixia_path
         return None
+
+    @classmethod
+    def get_scripts_path(cls, path=None):
+        path = cls.get_chrapi_dir(path)
+        if not path:
+            return None
+        script_path = osp.join(path, 'Scripts')
+        return script_path
 
     def start_rpc(self):
         import rpcpy32
@@ -163,7 +167,7 @@ class Chariot:
     def show_error(self, handle, code, where):
         '''转换错误信息'''
         rc, msg = self.CHR_api_get_return_msg(code)
-        if rc != CHR_OK:
+        if rc != RetureCode.CHR_OK:
             # Could not get the message: show why
             self.logger.error("%s failed\n", where)
             self.logger.error(
@@ -173,19 +177,21 @@ class Chariot:
             # Tell the user about the error
             self.logger.error("%s failed: rc = %d (%s)\n", where, code, msg)
 
-        code_tuple = (CHR_OPERATION_FAILED, CHR_OBJECT_INVALID,
-                      CHR_APP_GROUP_INVALID)
+        code_tuple = (RetureCode.CHR_OPERATION_FAILED,
+                      RetureCode.CHR_OBJECT_INVALID,
+                      RetureCode.CHR_APP_GROUP_INVALID)
 
         if (code in code_tuple) and handle != CHR_NULL_HANDLE:
             rc, error_info = self.CHR_common_error_get_info(
-                handle, CHR_DETAIL_LEVEL_ALL)
-            if rc == CHR_OK:
+                handle, CHR_DETAIL_LEVEL.CHR_DETAIL_LEVEL_ALL)
+            if rc == RetureCode.CHR_OK:
                 self.logger.error("Extended error info:\n%s\n", error_info)
 
     def api_initialize(self):
         '''初始化IxChariot API'''
-        rc, error_info = self.CHR_api_initialize(CHR_DETAIL_LEVEL_ALL)
-        if rc != CHR_OK:
+        rc, error_info = self.CHR_api_initialize(
+            CHR_DETAIL_LEVEL.CHR_DETAIL_LEVEL_ALL)
+        if rc != RetureCode.CHR_OK:
             self.logger.error("Initialization failed: rc = %d\n", rc)
             self.logger.error("Extended error info:\n%s\n", error_info)
         return rc
@@ -278,18 +284,18 @@ class Chariot:
         '''等待测试结束...'''
         is_stopped = False
         timer = 0
-        while (is_stopped == CHR_FALSE) and (timer < wait_time):
+        while (is_stopped == CHR_BOOLEAN.CHR_FALSE) and (timer < wait_time):
             rc = self.CHR_test_query_stop(test, timeout)
-            if rc == CHR_OK:
-                is_stopped = CHR_TRUE
-            elif rc == CHR_TIMED_OUT:
+            if rc == RetureCode.CHR_OK:
+                is_stopped = CHR_BOOLEAN.CHR_TRUE
+            elif rc == RetureCode.CHR_TIMED_OUT:
                 timer += timeout
                 self.logger.info("Waiting for test to stop... (%d)",
                                  timer, end='\r')
             else:
                 self.show_error(test, rc, "test_query_stop")
                 break
-        if (is_stopped == CHR_FALSE):
-            self.show_error(test, CHR_TIMED_OUT, "wait_for_test")
+        if (is_stopped == CHR_BOOLEAN.CHR_FALSE):
+            self.show_error(test, RetureCode.CHR_TIMED_OUT, "wait_for_test")
             return False
         return True
