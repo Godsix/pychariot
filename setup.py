@@ -15,6 +15,7 @@
 #    under the License.
 import os
 import os.path as osp
+from glob import glob
 import codecs
 import sys
 import shutil
@@ -67,15 +68,18 @@ def clean_pychariot32():
 def compile_pychariot32():
     clean_pychariot32()
     call([sys.executable, 'setup32.py', 'bdist_wheel'])
-    whl = [x for x in os.listdir('dist') if x.endswith('.whl')]
-    if not whl:
+    gen_whls = glob(osp.join('dist', '*.whl'))
+    if not gen_whls:
         return
-    exist_whl = [x for x in os.listdir('pychariot') if x.endswith('.whl')]
-    if exist_whl:
-        exist_whl_path = osp.realpath(osp.join('pychariot', whl[0]))
-        os.remove(exist_whl_path)
-    whl_path = osp.realpath(osp.join('dist', whl[0]))
-    shutil.copyfile(whl_path, osp.join('pychariot', osp.basename(whl_path)))
+    gen_whl = gen_whls[0]
+    dst_gen_whl = osp.join('pychariot', osp.basename(gen_whl))
+    exist_whls = glob(osp.join('pychariot', '*.whl'))
+    if exist_whls:
+        exist_whl = exist_whls[0]
+        if not osp.basename(exist_whl) == osp.basename(gen_whl):
+            os.remove(exist_whl)
+    if not osp.exists(dst_gen_whl):
+        shutil.copyfile(gen_whl, dst_gen_whl)
     clean_pychariot32()
 
 

@@ -28,7 +28,7 @@ from .chrapi_constant import (CHR_MAX_FILENAME, CHR_MAX_FILE_PATH,
                               CHR_MAX_RECEIVER_COMMENT)
 
 
-CHR_API_VERSION = (7, 10, 0)
+CHR_API_VERSION = (7, 10, 1)
 
 
 class BaseParam:
@@ -120,6 +120,7 @@ def ctypes_param(*param_args):
 
 
 class CHRAPI:
+    DLLNAME = 'ChrApi.dll'
 
     def __init__(self, path=None):
         self.path = path
@@ -133,7 +134,7 @@ class CHRAPI:
     def path(self, value):
         self._path = osp.realpath(value if value else osp.dirname(__file__))
         # import API dll
-        self.dll = CDLL(osp.join(self._path, 'ChrApi.dll'))
+        self.dll = CDLL(osp.join(self._path, self.DLLNAME))
 
     def __getattr__(self, attr):
         if attr.startswith('CHR'):

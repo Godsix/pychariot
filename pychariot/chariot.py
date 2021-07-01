@@ -6,14 +6,15 @@ Created on Thu Apr  1 08:51:27 2021
 """
 import os
 import os.path as osp
+from glob import glob
 from platform import architecture
 from functools import lru_cache
 from winreg import (HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY, KEY_READ,
                     OpenKey, QueryValueEx)
-from .const import CHR_DETAIL_LEVEL, RetureCode, CHR_NULL_HANDLE, CHR_BOOLEAN
+from .const import RetureCode, CHR_DETAIL_LEVEL, CHR_NULL_HANDLE, CHR_BOOLEAN
 
 
-CHARIOT_VERSION = (0, 2, 0)
+CHARIOT_VERSION = (0, 2, 1)
 
 
 def chr_api_wrapper(self, func):
@@ -27,8 +28,7 @@ def chr_api_wrapper(self, func):
             rc = ret
             out = None
         if rc != RetureCode.CHR_OK:
-            func_name = func.__name__
-            api_name = func_name[4:]
+            api_name = func.__name__[4:]
             if not api_name.startswith('api'):
                 handle = args[0] if args else CHR_NULL_HANDLE
                 self.show_error(handle, rc, api_name)
@@ -109,10 +109,9 @@ class Chariot:
         rpc_pip_list = self.rpc_server.pip_list()
         if 'pychariot32' not in rpc_pip_list:
             dir_path = osp.dirname(__file__)
-            whls = [x for x in os.listdir(dir_path) if x.endswith('.whl')]
+            whls = glob(osp.join(dir_path, '*.whl'))
             if whls:
-                whl_path = osp.join(dir_path, whls[0])
-                self.rpc_server.pip_install(whl_path)
+                self.rpc_server.pip_install(whls[0])
         self.rpc_server.start()
         self.rpc = rpyc.classic.connect("localhost")
         self.chrapi = self.rpc.modules.pychariot32
@@ -121,6 +120,7 @@ class Chariot:
         if self.rpc is not None:
             self.chrapi = None
             self.rpc = None
+            self.rpc_server.stop()
             self.rpc_server = None
             self.python = None
 
@@ -132,9 +132,8 @@ class Chariot:
             self.start_rpc()
             self.api = self.chrapi.CHRAPI(path)
         else:
-            import chrapi as chrapi32
-            self.chrapi = chrapi32
-            self.api = self.chrapi.CHRAPI(path)
+            from .chrapi import CHRAPI
+            self.api = CHRAPI(path)
         self.path = path
         self.api_dir.cache_clear()
 
