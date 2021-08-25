@@ -100,7 +100,7 @@ setup(
                            exclude=['*.contrib', '*.docs', '*.tests']),
     install_requires=[
         'rpyc>=5.0.0;platform_machine=="AMD64"',
-        'rpcpy32>=3.9.0;platform_machine=="AMD64"'
+        'rpcpy32>=3.8.0;platform_machine=="AMD64"'
     ],
     platforms="any",
     python_requires='>=3.6',

@@ -28,7 +28,7 @@ from .chrapi_constant import (CHR_MAX_FILENAME, CHR_MAX_FILE_PATH,
                               CHR_MAX_RECEIVER_COMMENT)
 
 
-CHR_API_VERSION = (7, 10, 1)
+CHR_API_VERSION = (7, 10, 2)
 
 
 class BaseParam:
@@ -138,7 +138,7 @@ class CHRAPI:
 
     def __getattr__(self, attr):
         if attr.startswith('CHR'):
-            if hasattr(self.api, attr):
+            if hasattr(self.dll, attr):
                 return getattr(self.dll, attr)
         raise AttributeError(
             "'{}' object has no attribute '{}'".format(self.__class__.__name__,

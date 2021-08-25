@@ -7,14 +7,15 @@ Created on Thu Apr  1 08:51:27 2021
 import os
 import os.path as osp
 from glob import glob
+from enum import IntEnum
 from platform import architecture
 from functools import lru_cache
 from winreg import (HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY, KEY_READ,
                     OpenKey, QueryValueEx)
-from .const import RetureCode, CHR_DETAIL_LEVEL, CHR_NULL_HANDLE, CHR_BOOLEAN
+from .const import RetureCode, CHR_DETAIL_LEVEL, CHR_NULL_HANDLE
 
 
-CHARIOT_VERSION = (0, 2, 1)
+CHARIOT_VERSION = (0, 2, 2)
 
 
 def chr_api_wrapper(self, func):
@@ -52,24 +53,55 @@ class PrintLogger:
         print(log % args, **kwargs)
 
 
+class Status(IntEnum):
+    OK = 0
+    INIT = 1
+    API = 2
+    RPC = 3
+
+
 class Chariot:
     APINAME = 'ChrApi.dll'
     REG_KEYS = (r"SOFTWARE\Ixia\IxChariot",
                 r"SOFTWARE\Ixia Communications\IxChariot")
+    # LOG = logging.getLogger()
 
-    def __init__(self, path=None):
+    def __init__(self, path=None, logger=PrintLogger(), auto=False,
+                 status_callback=None):
+        self.path = path
+        self.status_callback = status_callback
+        self.status = Status.INIT
         self.rpc = None
+        self.chrapi = None
+        self.logger = logger
+        self.pairs = []
+        if auto:
+            self.init_chariot()
+
+    @property
+    def status(self):
+        return self._status
+
+    @status.setter
+    def status(self, value):
+        if not getattr(self, '_status', None) == value:
+            self._status = value
+            if self.status_callback:
+                self.status_callback(value)
+
+    def init_chariot(self, path=None):
+        self.status = Status.API
+        if path is None:
+            path = self.path
         valid_path = self.get_chrapi_dir(path)
         if valid_path is None:
             raise FileNotFoundError(
                 "Can't find Ixia ixChariot C API file ChrApi.dll")
+        self.install_path = valid_path
         self.load_api(valid_path)
-        # self.logger = logging.getLogger()
-        self.logger = PrintLogger()
-        self.pairs = []
 
     @classmethod
-    def get_ixchariot_path(cls):
+    def get_install_path(cls):
         for reg_key in cls.REG_KEYS:
             try:
                 with OpenKey(HKEY_LOCAL_MACHINE, reg_key,
@@ -88,7 +120,7 @@ class Chariot:
             if item and osp.exists(osp.join(item, cls.APINAME)):
                 return item
         else:
-            ixia_path = cls.get_ixchariot_path()
+            ixia_path = cls.get_install_path()
             if ixia_path and osp.exists(osp.join(ixia_path, cls.APINAME)):
                 return ixia_path
         return None
@@ -102,8 +134,14 @@ class Chariot:
         return script_path
 
     def start_rpc(self):
+        if self.chrapi is not None:
+            return
+        self.restart_rpc()
+
+    def restart_rpc(self):
         import rpcpy32
         import rpyc
+        self.stop_rpc()
         self.python = rpcpy32
         self.rpc_server = self.python.RPC_SERVER
         rpc_pip_list = self.rpc_server.pip_list()
@@ -129,6 +167,7 @@ class Chariot:
         if not ost == 'WindowsPE':
             raise OSError('The OS must be based on Windows NT.')
         if arch == '64bit':
+            self.status = Status.RPC
             self.start_rpc()
             self.api = self.chrapi.CHRAPI(path)
         else:
@@ -140,7 +179,7 @@ class Chariot:
     def __del__(self):
         self.stop_rpc()
 
-    @lru_cache
+    @lru_cache()
     def api_dir(self):
         return [x for x in dir(self.api) if x.startswith('CHR_')]
 
@@ -149,17 +188,18 @@ class Chariot:
 
     def __getattr__(self, attr):
         classname = self.__class__.__name__
-        if attr.startswith('CHR_'):
-            if hasattr(self.api, attr):
-                return getattr(self.api, attr)
+        if attr not in ('_status', 'api'):
+            if attr.startswith('CHR_'):
+                if hasattr(self.api, attr):
+                    return getattr(self.api, attr)
+                else:
+                    classname = 'CHRAPI'
             else:
-                classname = 'CHRAPI'
-        else:
-            chr_name = 'CHR_{}'.format(attr)
-            if hasattr(self.api, chr_name):
-                func = getattr(self.api, chr_name)
-                wrapper = chr_api_wrapper(self, func)
-                return wrapper
+                chr_name = 'CHR_{}'.format(attr)
+                if hasattr(self.api, chr_name):
+                    func = getattr(self.api, chr_name)
+                    wrapper = chr_api_wrapper(self, func)
+                    return wrapper
         raise AttributeError(
             "'{}' object has no attribute '{}'".format(classname, attr))
 
@@ -205,7 +245,10 @@ class Chariot:
         self.apply_pair_attr(pair, e1, e2, script, **kwargs)
         return pair
 
-    def apply_pair_attr(self, pair, e1, e2, script, **kwargs):
+    def apply_pair_attr(self, pair, e1, e2, script,
+                        protocol=None,
+                        comment=None,
+                        **kwargs):
         self.set_pair_addr(pair, e1, e2)
         if osp.isabs(script):
             script_path = script
@@ -215,14 +258,14 @@ class Chariot:
             raise FileNotFoundError(
                 'Script is not fount:{}'.format(script_path))
         self.pair_use_script_filename(pair, script_path)
-        if 'comment' in kwargs:
-            self.pair_set_comment(pair, kwargs.get('comment'))
-        if 'protocol' in kwargs:
-            self.pair_set_protocol(pair, kwargs.get('protocol'))
+        if comment is not None:
+            self.pair_set_comment(pair, comment)
+        if protocol is not None:
+            self.pair_set_protocol(pair, protocol)
 
-    def get_pairs(self, test):
-        count = self.test_get_pair_count(test)
-        ret = [self.test_get_pair(test, x) for x in range(count)]
+    def get_pairs(self, test_handle):
+        count = self.test_get_pair_count(test_handle)
+        ret = [self.test_get_pair(test_handle, x) for x in range(count)]
         return ret
 
     def get_pair_time_elapsed(self, pair):
@@ -253,6 +296,8 @@ class Chariot:
         elapsed_max = max([self.get_pair_time_elapsed(x) for x in pairs])
         trans_sum = sum([self.get_pair_bytes_all_e1(x) for x in pairs])
         trans_mbps = trans_sum * 8e-6
+        if elapsed_max == 0:
+            return None
         average = trans_mbps / elapsed_max
         return average
 
@@ -279,22 +324,45 @@ class Chariot:
             self.test_add_pair(test_handle, dst_pair)
         return test_handle
 
-    def wait_for_test(self, test, wait_time, timeout=1):
-        '''等待测试结束...'''
-        is_stopped = False
+    def wait_for_test(self, test_handle, time_callback=None, timeout=1):
+        is_finished = False
         timer = 0
-        while (is_stopped == CHR_BOOLEAN.CHR_FALSE) and (timer < wait_time):
-            rc = self.CHR_test_query_stop(test, timeout)
+        while is_finished is False:
+            rc = self.CHR_test_query_stop(test_handle, timeout)
+            if time_callback is not None:
+                time_callback(timer)
             if rc == RetureCode.CHR_OK:
-                is_stopped = CHR_BOOLEAN.CHR_TRUE
+                is_finished = True
             elif rc == RetureCode.CHR_TIMED_OUT:
                 timer += timeout
                 self.logger.info("Waiting for test to stop... (%d)",
                                  timer, end='\r')
             else:
-                self.show_error(test, rc, "test_query_stop")
+                self.show_error(test_handle, rc, "test_query_stop")
                 break
-        if (is_stopped == CHR_BOOLEAN.CHR_FALSE):
-            self.show_error(test, RetureCode.CHR_TIMED_OUT, "wait_for_test")
+        if is_finished is False:
+            self.show_error(test_handle, RetureCode.CHR_TIMED_OUT,
+                            "wait_for_test")
+            return False
+        return True
+
+    def wait_test_timeout(self, test_handle, wait_time, timeout=1):
+        '''等待测试结束...'''
+        is_finished = False
+        timer = 0
+        while is_finished is False and (timer < wait_time):
+            rc = self.CHR_test_query_stop(test_handle, timeout)
+            if rc == RetureCode.CHR_OK:
+                is_finished = True
+            elif rc == RetureCode.CHR_TIMED_OUT:
+                timer += timeout
+                self.logger.info("Waiting for test to stop... (%d)",
+                                 timer, end='\r')
+            else:
+                self.show_error(test_handle, rc, "test_query_stop")
+                break
+        if is_finished is False:
+            self.show_error(test_handle, RetureCode.CHR_TIMED_OUT,
+                            "wait_for_test")
             return False
         return True

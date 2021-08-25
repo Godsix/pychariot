@@ -138,7 +138,7 @@ class CHRAPI:
 
     def __getattr__(self, attr):
         if attr.startswith('CHR'):
-            if hasattr(self.api, attr):
+            if hasattr(self.dll, attr):
                 return getattr(self.dll, attr)
         raise AttributeError(
             "'{}' object has no attribute '{}'".format(self.__class__.__name__,
