@@ -15,7 +15,7 @@ from winreg import (HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY, KEY_READ,
 from .const import RetureCode, CHR_DETAIL_LEVEL, CHR_NULL_HANDLE
 
 
-CHARIOT_VERSION = (0, 2, 2)
+CHARIOT_VERSION = (0, 2, 5)
 
 
 def chr_api_wrapper(self, func):
@@ -265,40 +265,54 @@ class Chariot:
 
     def get_pairs(self, test_handle):
         count = self.test_get_pair_count(test_handle)
-        ret = [self.test_get_pair(test_handle, x) for x in range(count)]
-        return ret
+        return tuple(self.test_get_pair(test_handle, x) for x in range(count))
 
     def get_pair_time_elapsed(self, pair):
         '''获取pair占用时间'''
         count = self.pair_get_timing_record_count(pair)
+        if count <= 0:
+            return 0
         handle = self.pair_get_timing_record(pair, count - 1)
         time_elapsed = self.timingrec_get_elapsed(handle)
         return time_elapsed
 
-    def get_pair_bytes_all_e1(self, pair):
+    def get_pair_measure_time(self, pair):
+        '''获取pair占用时间'''
+        measure_time = self.common_results_get_meas_time(pair)
+        return measure_time
+
+    def get_pair_bytes_all_e1(self, handle):
         '''获取pair传输总bytes数'''
-        sent = self.common_results_get_bytes_sent_e1(pair)
-        recv = self.common_results_get_bytes_recv_e1(pair)
+        sent = self.common_results_get_bytes_sent_e1(handle)
+        recv = self.common_results_get_bytes_recv_e1(handle)
         return sent + recv
 
     def get_pairs_bytes_sent_e1(self, pairs):
         '''获取pair传输总发送bytes数'''
-        res = [self.common_results_get_bytes_sent_e1(x) for x in pairs]
-        return sum(res)
+        return sum(self.common_results_get_bytes_sent_e1(x) for x in pairs)
 
     def get_pairs_bytes_recv_e1(self, pairs):
         '''获取pair传输总接收bytes数'''
-        res = [self.common_results_get_bytes_recv_e1(x) for x in pairs]
-        return sum(res)
+        return sum(self.common_results_get_bytes_recv_e1(x) for x in pairs)
+
+    # def get_pairs_results_average(self, pairs):
+    #     '''获取pairs序列的总透传平均速率'''
+    #     elapsed_max = max(self.get_pair_time_elapsed(x) for x in pairs)
+    #     if elapsed_max == 0:
+    #         return None
+    #     trans_sum = sum(self.get_pair_bytes_all_e1(x) for x in pairs)
+    #     trans_mbps = trans_sum * 8e-6
+    #     average = trans_mbps / elapsed_max
+    #     return average
 
     def get_pairs_results_average(self, pairs):
         '''获取pairs序列的总透传平均速率'''
-        elapsed_max = max([self.get_pair_time_elapsed(x) for x in pairs])
-        trans_sum = sum([self.get_pair_bytes_all_e1(x) for x in pairs])
-        trans_mbps = trans_sum * 8e-6
-        if elapsed_max == 0:
+        measure_time_max = max(self.get_pair_measure_time(x) for x in pairs)
+        if measure_time_max == 0:
             return None
-        average = trans_mbps / elapsed_max
+        trans_sum = sum(self.get_pair_bytes_all_e1(x) for x in pairs)
+        trans_mbps = trans_sum * 8e-6
+        average = trans_mbps / measure_time_max
         return average
 
     def pair_swap_endpoints(self, pair):

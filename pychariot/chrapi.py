@@ -28,7 +28,7 @@ from .chrapi_constant import (CHR_MAX_FILENAME, CHR_MAX_FILE_PATH,
                               CHR_MAX_RECEIVER_COMMENT)
 
 
-CHR_API_VERSION = (7, 10, 1)
+CHR_API_VERSION = (7, 10, 3)
 
 
 class BaseParam:
@@ -81,9 +81,11 @@ class ParamOut(BaseParam):
         if self.datatype in (bytes, str):
             value = self.encode_data(self.data.value, str)
             return value
-        if self.datatype in (c_int, c_ulong, c_long, c_ushort, c_char,
-                             c_ubyte, c_double, c_longlong):
+        if self.datatype in (c_int, c_ulong, c_long, c_ushort, c_ubyte,
+                             c_double, c_longlong):
             return self.data.value
+        if self.datatype == c_char:
+            return int.from_bytes(self.data.value, 'big')
 
 
 def ctypes_param(*param_args):
