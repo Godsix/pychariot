@@ -295,25 +295,25 @@ class Chariot:
         '''获取pair传输总接收bytes数'''
         return sum(self.common_results_get_bytes_recv_e1(x) for x in pairs)
 
-    # def get_pairs_results_average(self, pairs):
-    #     '''获取pairs序列的总透传平均速率'''
-    #     elapsed_max = max(self.get_pair_time_elapsed(x) for x in pairs)
-    #     if elapsed_max == 0:
-    #         return None
-    #     trans_sum = sum(self.get_pair_bytes_all_e1(x) for x in pairs)
-    #     trans_mbps = trans_sum * 8e-6
-    #     average = trans_mbps / elapsed_max
-    #     return average
-
     def get_pairs_results_average(self, pairs):
         '''获取pairs序列的总透传平均速率'''
-        measure_time_max = max(self.get_pair_measure_time(x) for x in pairs)
-        if measure_time_max == 0:
+        elapsed_max = max(self.get_pair_time_elapsed(x) for x in pairs)
+        if elapsed_max == 0:
             return None
         trans_sum = sum(self.get_pair_bytes_all_e1(x) for x in pairs)
         trans_mbps = trans_sum * 8e-6
-        average = trans_mbps / measure_time_max
+        average = trans_mbps / elapsed_max
         return average
+
+    # def get_pairs_results_average(self, pairs):
+    #     '''获取pairs序列的总透传平均速率'''
+    #     measure_time_max = max(self.get_pair_measure_time(x) for x in pairs)
+    #     if measure_time_max == 0:
+    #         return None
+    #     trans_sum = sum(self.get_pair_bytes_all_e1(x) for x in pairs)
+    #     trans_mbps = trans_sum * 8e-6
+    #     average = trans_mbps / measure_time_max
+    #     return average
 
     def pair_swap_endpoints(self, pair):
         '''获取pairs序列的总透传平均速率'''
