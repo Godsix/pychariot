@@ -32,7 +32,7 @@ CHR_API_VERSION = (7, 10, 3)
 
 
 class BaseParam:
-    ENCODE = 'gbk'
+    ENCODE = 'ascii'
 
     def __init__(self, datatype):
         self.datatype = datatype
