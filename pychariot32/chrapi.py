@@ -5,128 +5,54 @@ Created on Wed Feb 10 11:31:50 2021
 @author: haoyue
 """
 import os.path as osp
-from ctypes import (CDLL, create_string_buffer, create_unicode_buffer, byref,
-                    c_int, c_ulong, c_long,
-                    c_ushort, c_char, c_ubyte, c_double, c_longlong)
-from functools import wraps
 import logging
-from .chrapi_constant import (CHR_MAX_FILENAME, CHR_MAX_FILE_PATH,
-                              CHR_MAX_EMBEDDED_PAYLOAD_SIZE,
-                              CHR_MAX_ERROR_INFO, CHR_MAX_PAIR_COMMENT,
-                              CHR_MAX_ADDR, CHR_MAX_MULTICAST_ADDR,
-                              CHR_MAX_QOS_NAME, CHR_MAX_APPL_SCRIPT_NAME,
-                              CHR_MAX_GROUP_NAME, CHR_MAX_VERSION,
-                              CHR_MAX_RETURN_MSG,
-                              CHR_MAX_SCRIPT_VARIABLE_VALUE,
-                              CHR_MAX_CFG_PARM, CHR_MAX_ADDR_STRING,
-                              CHR_BSSID_SIZE, CHR_MAX_APP_GROUP_NAME,
-                              CHR_MAX_APP_GROUP_COMMENT,
-                              CHR_MAX_APP_GROUP_EVENT_NAME,
-                              CHR_MAX_APP_GROUP_EVENT_COMMENT,
-                              CHR_MAX_CHANNEL_NAME, CHR_MAX_RECEIVER_NAME,
-                              CHR_MAX_CHANNEL_COMMENT,
-                              CHR_MAX_RECEIVER_COMMENT)
+from platform import architecture
+from ctypes import (CDLL, c_ubyte, c_byte, c_ushort, c_int, c_ulong, c_long,
+                    c_longlong, c_double, byref)
+from .chrapi_defs import (CHR_MAX_FILENAME, CHR_MAX_FILE_PATH,
+                          CHR_MAX_EMBEDDED_PAYLOAD_SIZE,
+                          CHR_MAX_ADDR_STRING,
+                          CHR_MAX_ERROR_INFO, CHR_MAX_PAIR_COMMENT,
+                          CHR_MAX_ADDR, CHR_MAX_MULTICAST_ADDR,
+                          CHR_MAX_QOS_NAME, CHR_MAX_APPL_SCRIPT_NAME,
+                          CHR_MAX_GROUP_NAME, CHR_MAX_VERSION,
+                          CHR_BSSID_SIZE, CHR_MAX_SCRIPT_VARIABLE_VALUE,
+                          CHR_MAX_CFG_PARM, CHR_MAX_APP_GROUP_NAME,
+                          CHR_MAX_APP_GROUP_COMMENT, CHR_MAX_RETURN_MSG,
+                          CHR_MAX_APP_GROUP_EVENT_NAME,
+                          CHR_MAX_APP_GROUP_EVENT_COMMENT,
+                          CHR_MAX_CHANNEL_NAME, CHR_MAX_RECEIVER_NAME,
+                          CHR_MAX_CHANNEL_COMMENT,
+                          CHR_MAX_RECEIVER_COMMENT, CHR_ADDR_STRING,
+                          CHR_BUFFER_TOO_SMALL,
+                          tm, c_time_t, c_ubyte_p)
+from .common import CHRDecorator, ParamOut, ParamIn, ParamInOut
+from .utils import WinTools
 
 
-CHR_API_VERSION = (7, 10, 3)
+CHR_API_VERSION = (7, 10, 4)
 
 
-class BaseParam:
-    ENCODE = 'gbk'
-
-    def __init__(self, datatype):
-        self.datatype = datatype
-
-    @classmethod
-    def encode_data(cls, data, datatype):
-        if isinstance(data, datatype):
-            return data
-        if datatype == bytes and isinstance(data, str):
-            return data.encode(cls.ENCODE)
-        if datatype == str and isinstance(data, bytes):
-            return data.decode(cls.ENCODE)
-
-
-class ParamIn(BaseParam):
-
-    def __call__(self, value):
-        if self.datatype in (bytes, str):
-            valid_value = self.encode_data(value, self.datatype)
-            return valid_value, len(valid_value)
-        return tuple([self.datatype(value)])
-
-
-class ParamOut(BaseParam):
-
-    def __init__(self, datatype, max_len=None):
-        super().__init__(datatype)
-        self.maxlength = CHR_MAX_RETURN_MSG if max_len is None else max_len
-        self.data = None
-        self.data_len = 0
-
-    def __call__(self):
-        if self.datatype in (bytes, str):
-            if self.datatype == bytes:
-                self.data = create_string_buffer(b"\0", self.maxlength)
-            else:
-                self.data = create_unicode_buffer("\0", self.maxlength)
-            self.data_len = c_ulong()
-            return self.data, c_ulong(self.maxlength), byref(self.data_len)
-        if self.datatype in (c_int, c_ulong, c_long, c_ushort, c_char,
-                             c_ubyte, c_double, c_longlong):
-            self.data = self.datatype()
-            return tuple([byref(self.data)])
-
-    def get_result(self):
-        if self.datatype in (bytes, str):
-            value = self.encode_data(self.data.value, str)
-            return value
-        if self.datatype in (c_int, c_ulong, c_long, c_ushort, c_ubyte,
-                             c_double, c_longlong):
-            return self.data.value
-        if self.datatype == c_char:
-            return int.from_bytes(self.data.value, 'big')
-
-
-def ctypes_param(*param_args):
-    def decorator(func):
-        func_name = func.__name__
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            self, *param = args
-            dll = getattr(self, 'dll')
-            chrapi_func = getattr(dll, func_name)
-            param_iter = iter(param)
-            valid_args = []
-            out_params = []
-            param_iter = iter(param)
-            for item in param_args:
-                if isinstance(item, ParamIn):
-                    valid_args.extend(item(next(param_iter)))
-                elif isinstance(item, ParamOut):
-                    out_params.append(item)
-                    valid_args.extend(item())
-                elif item in (str, bytes):
-                    param_item = ParamIn.encode_data(next(param_iter), item)
-                    valid_args.append(param_item)
-                else:
-                    valid_args.append(item(next(param_iter)))
-            ret = chrapi_func(*valid_args, **kwargs)
-            if out_params:
-                out_values = [x.get_result() for x in out_params]
-                return ret, *out_values
-            return ret
-        return wrapper
-    return decorator
+ctypes_param = CHRDecorator()
 
 
 class CHRAPI:
     DLLNAME = 'ChrApi.dll'
 
-    def __init__(self, path=None):
-        self.path = path
+    def __init__(self, path, version=None):
+        assert architecture()[0] == '32bit', 'Class must run on 32bit Python.'
         self.logger = logging.getLogger()
+        self.version = version
+        self.path = path
+
+    @property
+    def version(self):
+        return self._version
+
+    @version.setter
+    def version(self, value):
+        self._path = value
+        ctypes_param.version = value
 
     @property
     def path(self):
@@ -137,6 +63,7 @@ class CHRAPI:
         self._path = osp.realpath(value if value else osp.dirname(__file__))
         # import API dll
         self.dll = CDLL(osp.join(self._path, self.DLLNAME))
+        ctypes_param.init_cdll(self.dll)
 
     def __getattr__(self, attr):
         if attr.startswith('CHR'):
@@ -169,7 +96,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(ParamOut(c_char))
+    @ctypes_param(ParamOut(c_byte))
     def CHR_api_get_license_type(self):
         '''
         The CHR_api_get_license_type function returns the value of the current
@@ -205,7 +132,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_char, ParamOut(c_ushort))
+    @ctypes_param(c_byte, ParamOut(c_ushort))
     def CHR_api_get_reporting_port(self, protocol: int):
         '''
         The CHR_api_get_reporting_port function gets the port number used to
@@ -230,7 +157,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_int, ParamOut(bytes))
+    @ctypes_param(c_int, ParamOut(bytes, CHR_MAX_RETURN_MSG))
     def CHR_api_get_return_msg(self, return_code: int):
         '''
         The CHR_api_get_return_msg function gets the text message
@@ -298,14 +225,14 @@ class CHRAPI:
         pass
 
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_ERROR_INFO))
-    def CHR_api_initialize(self, detail: int):
+    def CHR_api_initialize(self, detail_level: int):
         '''
         The CHR_api_initialize function initializes the IxChariot API.
         This function must be called before any other IxChariot API function.
 
         Parameters
         ----------
-        detail : int
+        detail_level : int
             The detail level for extended error information.
 
         Returns
@@ -319,6 +246,7 @@ class CHRAPI:
         '''
         pass
 
+    @ctypes_param.since('7.10')
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_ERROR_INFO), bytes, c_ulong,
                   c_ulong)
     def CHR_api_initialize_with_license_details(self,
@@ -354,7 +282,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_char, c_ushort)
+    @ctypes_param(c_byte, c_ushort)
     def CHR_api_set_reporting_port(self, protocol: int, port: int):
         '''
         The CHR_api_set_reporting_port function sets or changes the port
@@ -384,7 +312,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_api_get_pair_type(self, handle: int):
         '''
         The CHR_api_get_pair_type function gets the pair type for a pair
@@ -405,16 +333,16 @@ class CHRAPI:
         rc : int
             The following return code indicates that the function call was
             successful: CHR_OK.
-        type : str
+        type : int
             A pointer to the variable where the pair type identifier
             (CHR_PAIR_TYPE) is returned.
         '''
         pass
 
     #  Ixia
-    @ctypes_param(bytes, c_ulong, ParamOut(bytes, CHR_MAX_ADDR_STRING))
-    def CHR_api_get_port_mgmt_ip_list(self, port_mgmt_ip: str,
-                                      ip_addr_count: int):
+    @ctypes_param.param(c_ulong, ParamInOut(CHR_ADDR_STRING),
+                        ParamOut(c_ulong))
+    def CHR_api_get_port_mgmt_ip_list(self):
         '''
         The CHR_api_get_port_mgmt_ip_list function retrieves the list of
         available hardware performance pair port management IP addresses.
@@ -454,11 +382,23 @@ class CHRAPI:
             addresses available from the system, regardless of what was passed
             in ip_addr_count.
         '''
-        pass
+        ip_addr_read = c_ulong()
+        rc = self.dll.CHR_api_get_port_mgmt_ip_list(0, None,
+                                                    byref(ip_addr_read))
+        if rc == CHR_BUFFER_TOO_SMALL:
+            length = ip_addr_read.value
+            buffer_type = CHR_ADDR_STRING * length
+            buffer = buffer_type()
+            rc = self.dll.CHR_api_get_port_mgmt_ip_list(length, buffer,
+                                                        byref(ip_addr_read))
+            length = ip_addr_read.value
+            result = [buffer[i].value.decode() for i in range(length)]
+            return rc, result
+        return rc, []
 
-    @ctypes_param(bytes, c_ulong, ParamOut(bytes, CHR_MAX_ADDR_STRING))
-    def CHR_api_get_network_ip_list(self, port_mgmt_ip: str,
-                                    ip_addr_count: int):
+    @ctypes_param.param(CHR_ADDR_STRING, c_ulong, ParamOut(CHR_ADDR_STRING),
+                        ParamOut(c_ulong))
+    def CHR_api_get_network_ip_list(self, port_mgmt_ip: str):
         '''
         The CHR_api_get_network_ip_list function retrieves the list of
         available hardware performance pair network IP addresses that are
@@ -498,7 +438,24 @@ class CHRAPI:
             addresses available from the system, regardless of what was passed
             in ip_addr_count.
         '''
-        pass
+        if isinstance(port_mgmt_ip, str):
+            port_mgmt_ip = port_mgmt_ip.encode()
+        port_mgmt_ip_array = CHR_ADDR_STRING()
+        port_mgmt_ip_array.value = port_mgmt_ip
+        ip_addr_read = c_ulong()
+        rc = self.dll.CHR_api_get_network_ip_list(port_mgmt_ip_array, 0, None,
+                                                  byref(ip_addr_read))
+        if rc == CHR_BUFFER_TOO_SMALL:
+            length = ip_addr_read.value
+            buffer_type = CHR_ADDR_STRING * length
+            buffer = buffer_type()
+            rc = self.dll.CHR_api_get_network_ip_list(port_mgmt_ip_array,
+                                                      length, buffer,
+                                                      byref(ip_addr_read))
+            length = ip_addr_read.value
+            result = [buffer[i].value.decode() for i in range(length)]
+            return rc, result
+        return rc, []
 
     #  Licensing Control Functions
 
@@ -595,6 +552,7 @@ class CHRAPI:
         '''
         pass
 
+    @ctypes_param.since('7.10')
     @ctypes_param(bytes)
     def CHR_api_license_change_license_server(self, server_name: str):
         '''
@@ -618,7 +576,8 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(ParamOut(bytes))
+    @ctypes_param.since('7.10')
+    @ctypes_param(ParamOut(bytes, CHR_MAX_ADDR_STRING))
     def CHR_api_license_get_license_server(self):
         '''
         The CHR_api_license_get_license_server function gets the name of the
@@ -637,6 +596,7 @@ class CHRAPI:
         '''
         pass
 
+    @ctypes_param.since('7.10')
     @ctypes_param(ParamOut(c_ulong))
     def CHR_api_license_get_borrow_days_remaining(self):
         '''
@@ -659,7 +619,7 @@ class CHRAPI:
         pass
 
     #  QoS functions
-    @ctypes_param(c_char, ParamIn(bytes), c_ubyte)
+    @ctypes_param(c_byte, ParamIn(bytes), c_ubyte)
     def CHR_api_new_qos_tos_template(self, template_type: int,
                                      template_name: str,
                                      tos_mask: int):
@@ -674,7 +634,7 @@ class CHRAPI:
             CHR_QOS_TEMPLATE_TOS_BIT_MASK, CHR_QOS_TEMPLATE_DIFFSERV,
             or CHR_QOS_TEMPLATE_L2_PRIORITY.
         template_name : str
-            A string containing the QoS template name..
+            A string containing the QoS template name.
         tos_mask : int
             The TOS mask value to be used by the template, given as a decimal
             number.
@@ -711,7 +671,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_char, ParamIn(bytes), c_ubyte)
+    @ctypes_param(c_byte, ParamIn(bytes), c_ubyte)
     def CHR_api_modify_qos_tos_template(self, template_type: int,
                                         template_name: str,
                                         tos_mask: int):
@@ -1731,7 +1691,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_dgopts_get_low_sender_jitter(self, datagram_options_handle: int):
         '''
         The CHR_dgopts_get_low_sender_jitter function gets the value of the
@@ -1757,7 +1717,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_dgopts_get_limit_data_rate(self, datagram_options_handle: int):
         '''
         The CHR_dgopts_get_limit_data_rate function gets the value of the
@@ -1833,7 +1793,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_dgopts_get_RTP_use_extended_headers(self,
                                                 datagram_options_handle: int):
         '''
@@ -1984,7 +1944,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_dgopts_set_low_sender_jitter(self, datagram_options_handle: int,
                                          flag: int):
         '''
@@ -2010,7 +1970,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_dgopts_set_limit_data_rate(self, datagram_options_handle: int,
                                        flag: int):
         '''
@@ -2090,7 +2050,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_dgopts_set_RTP_use_extended_headers(self,
                                                 datagram_options_handle: int,
                                                 flag: int):
@@ -2159,7 +2119,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(bytes))
+    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_RETURN_MSG))
     def CHR_hoprec_get_hop_name(self, hoprec_handle: int):
         '''
         The CHR_hoprec_get_hop_name function gets the resolved name of a hop in
@@ -2352,7 +2312,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_mgroup_get_console_e1_protocol(self, mgroup_handle: int):
         '''
         The CHR_mgroup_get_console_e1_protocol function gets the Console to
@@ -2399,7 +2359,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char, ParamOut(bytes, CHR_MAX_CFG_PARM))
+    @ctypes_param(c_ulong, c_byte, ParamOut(bytes, CHR_MAX_CFG_PARM))
     def CHR_mgroup_get_e1_config_value(self,
                                        mgroup_handle: int,
                                        parameter: int):
@@ -2543,7 +2503,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_mgroup_get_protocol(self, mgroup_handle: int):
         '''
         The CHR_mgroup_get_protocol function gets the Endpoint 1 to Endpoint 2
@@ -2588,7 +2548,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_FILE_PATH))
+    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_FILENAME))
     def CHR_mgroup_get_script_filename(self, mgroup_handle: int):
         '''
         The CHR_mgroup_get_script_filename function gets the script filename
@@ -2610,7 +2570,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_mgroup_get_use_console_e1_values(self, mgroup_handle: int):
         '''
         The CHR_mgroup_get_use_console_e1_values function gets whether the
@@ -2684,8 +2644,8 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamIn(bytes), ParamOut(bytes, CHR_MAX_FILENAME),
-                  ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamIn(bytes), ParamOut(bytes, CHR_MAX_FILE_PATH),
+                  ParamOut(c_byte))
     def CHR_mgroup_get_payload_file(self,
                                     mgroup_handle: int,
                                     variable_name: str):
@@ -2719,7 +2679,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_mgroup_is_udp_RFC768_streaming(self, mgroup_handle: int):
         '''
         The CHR_ mgroup_is_udp_RFC768_streaming function determines whether or
@@ -2744,7 +2704,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_mgroup_is_disabled(self, mgroup_handle: int):
         '''
         The CHR_mgroup_is_disabled function determines whether or not the pairs
@@ -2869,7 +2829,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_mgroup_set_console_e1_protocol(self,
                                            mgroup_handle: int,
                                            protocol: int):
@@ -2919,7 +2879,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_mgroup_set_lock(self, mgroup_handle: int, lock: int):
         '''
         The function CHR_mgroup_set_lock locks an unlocked multicast group
@@ -3015,7 +2975,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_mgroup_set_protocol(self, mgroup_handle: int, protocol: int):
         '''
         The CHR_mgroup_set_protocol function sets or changes the Endpoint 1 to
@@ -3123,7 +3083,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamIn(bytes), ParamIn(bytes), c_char)
+    @ctypes_param(c_ulong, ParamIn(bytes), ParamIn(bytes), c_byte)
     def CHR_mgroup_set_payload_file(self, mgroup_handle: int,
                                     variable_name: str,
                                     filename: str,
@@ -3158,7 +3118,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_mgroup_set_use_console_e1_values(self,
                                              mgroup_handle: int,
                                              use_values: int):
@@ -3213,7 +3173,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_mgroup_disable(self, mgroup_handle: int, disable: int):
         '''
         The CHR_mgroup_disable function disables or enables all of the pairs
@@ -3285,7 +3245,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char, ParamOut(bytes, CHR_MAX_CFG_PARM))
+    @ctypes_param(c_ulong, c_byte, ParamOut(bytes, CHR_MAX_CFG_PARM))
     def CHR_mpair_get_e2_config_value(self, pair_handle: int, parameter: int):
         '''
         The CHR_mpair_get_e2_config_value function gets an Endpoint 2
@@ -3387,7 +3347,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_mpair_get_use_setup_e1_e2_values(self, mpair_handle: int):
         '''
         The CHR_mpair_get_use_setup_e1_e2_values function gets whether to use
@@ -3409,7 +3369,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_mpair_get_runStatus(self, mpair_handle: int):
         '''
         The CHR_mpair_get_runStatus function returns the run status for this
@@ -3493,7 +3453,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_mpair_set_lock(self, mpair_handle: int, lock: int):
         '''
         The function CHR_mpair_set_lock locks an unlocked multicast pair object
@@ -3547,7 +3507,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_mpair_set_use_setup_e1_e2_values(self,
                                              mpair_handle: int,
                                              use: int):
@@ -3701,7 +3661,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_pair_get_console_e1_protocol(self, pair_handle: int):
         '''
         The CHR_pair_get_console_e1_protocol function gets the Console to
@@ -3769,7 +3729,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char, ParamOut(bytes, CHR_MAX_CFG_PARM))
+    @ctypes_param(c_ulong, c_byte, ParamOut(bytes, CHR_MAX_CFG_PARM))
     def CHR_pair_get_e1_config_value(self, pair_handle: int, parameter: int):
         '''
         The CHR_pair_get_e1_config_value function gets an Endpoint 1
@@ -3796,7 +3756,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char, ParamOut(bytes, CHR_MAX_CFG_PARM))
+    @ctypes_param(c_ulong, c_byte, ParamOut(bytes, CHR_MAX_CFG_PARM))
     def CHR_pair_get_e2_config_value(self, pair_handle: int, parameter: int):
         '''
         The CHR_pair_get_e2_config_value function gets an Endpoint 2
@@ -3824,7 +3784,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_pair_get_protocol(self, pair_handle: int):
         '''
         The CHR_pair_get_protocol function gets the Endpoint 1 to Endpoint 2
@@ -3868,6 +3828,7 @@ class CHRAPI:
         '''
         pass
 
+    @ctypes_param.since('7.10')
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_QOS_NAME))
     def CHR_pair_get_e1_qos_name(self, pair_handle: int):
         '''
@@ -3890,6 +3851,7 @@ class CHRAPI:
         '''
         pass
 
+    @ctypes_param.since('7.10')
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_QOS_NAME))
     def CHR_pair_get_e2_qos_name(self, pair_handle: int):
         '''
@@ -3912,7 +3874,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_pair_get_runStatus(self, pair_handle: int):
         '''
         The CHR_pair_get_runStatus function gets the status of an endpoint pair
@@ -3954,7 +3916,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_FILE_PATH))
+    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_FILENAME))
     def CHR_pair_get_script_filename(self, pair_handle: int):
         '''
         The CHR_pair_get_script_filename function gets the script filename for
@@ -4051,7 +4013,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_pair_get_use_console_e1_values(self, pair_handle: int):
         '''
         The CHR_pair_get_use_console_e1_values function gets whether to use the
@@ -4072,7 +4034,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_pair_get_use_setup_e1_e2_values(self, pair_handle: int):
         '''
         The CHR_pair_get_use_setup_e1_e2_values function gets whether to use
@@ -4094,7 +4056,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_pair_is_udp_RFC768_streaming(self, pair_handle: int):
         '''
         The CHR_ pair_is_udp_RFC768_streaming function determines whether or
@@ -4118,7 +4080,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_pair_is_disabled(self, pair_handle: int):
         '''
         The CHR_pair_is_disabled function determines whether or not the
@@ -4214,7 +4176,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_pair_set_console_e1_protocol(self,
                                          pair_handle: int,
                                          protocol: int):
@@ -4284,7 +4246,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_pair_set_lock(self, pair_handle: int, lock: int):
         '''
         The function CHR_pair_set_lock locks an unlocked pair object if lock is
@@ -4313,7 +4275,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_pair_set_protocol(self, pair_handle: int, protocol: int):
         '''
         The CHR_pair_set_protocol function sets or changes the Endpoint 1 to
@@ -4364,6 +4326,7 @@ class CHRAPI:
         '''
         pass
 
+    @ctypes_param.since('7.10')
     @ctypes_param(c_ulong, ParamIn(bytes))
     def CHR_pair_set_e1_qos_name(self, pair_handle: int, qos_name: str):
         '''
@@ -4386,6 +4349,7 @@ class CHRAPI:
         '''
         pass
 
+    @ctypes_param.since('7.10')
     @ctypes_param(c_ulong, ParamIn(bytes))
     def CHR_pair_set_e2_qos_name(self, pair_handle: int, qos_name: str):
         '''
@@ -4523,7 +4487,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamIn(bytes), ParamIn(bytes), c_char)
+    @ctypes_param(c_ulong, ParamIn(bytes), ParamIn(bytes), c_byte)
     def CHR_pair_set_payload_file(self, pair_handle: int,
                                   variable_name: str, filename: str,
                                   embedded: int):
@@ -4557,8 +4521,8 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamIn(bytes), ParamOut(bytes, CHR_MAX_FILENAME),
-                  ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamIn(bytes), ParamOut(bytes, CHR_MAX_FILE_PATH),
+                  ParamOut(c_byte))
     def CHR_pair_get_payload_file(self, pair_handle: int, variable_name: str):
         '''
         The CHR_pair_get_payload_file function gets the name of the payload
@@ -4619,7 +4583,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_pair_set_use_console_e1_values(self, pair_handle: int,
                                            use_values: int):
         '''
@@ -4648,7 +4612,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_pair_set_use_setup_e1_e2_values(self, pair_handle: int,
                                             use_values: int):
         '''
@@ -4700,7 +4664,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_pair_disable(self, pair_handle: int, disable: int):
         '''
         The CHR_pair_disable function disables or enables the specified pair
@@ -4728,6 +4692,7 @@ class CHRAPI:
         '''
         pass
 
+    @ctypes_param.since('7.10')
     @ctypes_param(c_ulong)
     def CHR_pair_swap_endpoints(self, pair_handle: int):
         '''
@@ -4754,7 +4719,7 @@ class CHRAPI:
     #  Pair/Multicast Group Pair Results Extraction Functions
     #  (CHR_PAIR_HANDLE/CHR_MPAIR_HANDLE)
 
-    @ctypes_param(c_ulong, c_char, ParamOut(c_double))
+    @ctypes_param(c_ulong, c_byte, ParamOut(c_double))
     def CHR_pair_results_get_average(self, handle: int, result_type: int):
         '''
         The CHR_pair_results_get_average function gets the average for the
@@ -4834,7 +4799,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char, ParamOut(c_double))
+    @ctypes_param(c_ulong, c_byte, ParamOut(c_double))
     def CHR_pair_results_get_maximum(self, handle: int, result_type: int):
         '''
         The CHR_pair_results_get_maximum function gets the maximum for the
@@ -4862,7 +4827,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char, ParamOut(c_double))
+    @ctypes_param(c_ulong, c_byte, ParamOut(c_double))
     def CHR_pair_results_get_minimum(self,
                                      handle: int,
                                      result_type: int):
@@ -4918,7 +4883,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char, ParamOut(c_double))
+    @ctypes_param(c_ulong, c_byte, ParamOut(c_double))
     def CHR_pair_results_get_95pct_confidence(self, handle: int,
                                               result_type: int):
         '''
@@ -4972,7 +4937,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_CPU_util(self, run_options_handle: int):
         '''
         The CHR_runopts_get_CPU_util function gets the option value indicating
@@ -4995,7 +4960,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_collect_TCP_stats(self, run_options_handle: int):
         '''
         CHR_runopts_get_collect_TCP_stats
@@ -5015,7 +4980,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_allow_pair_reinit(self, run_options_handle: int):
         '''
         The CHR_runopts_get_allow_pair_reinit function returns a pointer that
@@ -5090,7 +5055,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_allow_pair_reinit_run(self, run_options_handle: int):
         '''
         The CHR_runopts_get_allow_pair_reinit_run function returns a pointer
@@ -5166,7 +5131,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_HW_timestamps(self, run_options_handle: int):
         '''
         The CHR_runopts_get_HW_timestamps function gets a variable that
@@ -5191,7 +5156,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_fewer_setup_connections(self, run_options_handle: int):
         '''
         The CHR_runopts_get_fewer_setup_connections function gets whether the
@@ -5217,7 +5182,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_apply_dod_only(self, run_options_handle: int):
         '''
         The CHR_runopts_get_apply_dod_only function returns a pointer that
@@ -5240,7 +5205,8 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param.since('7.10')
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_deconfigure_ports(self, run_options_handle: int):
         '''
         The CHR_runopts_get_deconfigure_ports function gets the option value
@@ -5263,7 +5229,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char, ParamOut(c_ulong))
+    @ctypes_param(c_ulong, c_byte, ParamOut(c_ulong))
     def CHR_runopts_get_num_result_ranges(self, handle: int, result_type: int):
         '''
         The CHR_runopts_get_num_result_ranges function gets the number of
@@ -5286,7 +5252,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_poll_endpoints(self, run_options_handle: int):
         '''
         The CHR_runopts_get_poll_endpoints function gets whether the endpoints
@@ -5329,7 +5295,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_random_new_seed(self, run_options_handle: int):
         '''
         The CHR_runopts_get_random_new_seed function gets whether to reseed the
@@ -5351,7 +5317,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_reporting_type(self, run_options_handle: int):
         '''
         The CHR_runopts_get_reporting_type function gets how to report the
@@ -5374,7 +5340,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_poll_retrieving_type(self, run_options_handle: int):
         '''
         The CHR_runopts_get_poll_retrieving_type function gets the value of the
@@ -5402,7 +5368,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_reporting_firewall(self, run_options_handle: int):
         '''
         The CHR_runopts_get_reporting_firewall function gets the value that
@@ -5425,7 +5391,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char, c_ulong, ParamOut(c_ulong),
+    @ctypes_param(c_ulong, c_byte, c_ulong, ParamOut(c_ulong),
                   ParamOut(c_ulong))
     def CHR_runopts_get_result_range(self,
                                      run_options_handle: int,
@@ -5481,7 +5447,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_stop_on_init_failure(self, run_options_handle: int):
         '''
         The CHR_runopts_get_stop_on_init_failure function gets whether the test
@@ -5524,7 +5490,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_test_end(self, run_options_handle: int):
         '''
         The CHR_runopts_get_test_end function gets the option indicating when
@@ -5547,7 +5513,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_validate_on_recv(self, run_options_handle: int):
         '''
         The CHR_runopts_get_validate_on_recv function gets whether to validate
@@ -5569,7 +5535,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_clksync_hardware_ts(self, run_options_handle: int):
         '''
         The CHR_runopts_get_clksync_hardware_ts function returns a pointer that
@@ -5597,7 +5563,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_runopts_get_clksync_external(self, run_options_handle: int):
         '''
         The CHR_runopts_get_clksync_external function returns a pointer that
@@ -5621,6 +5587,7 @@ class CHRAPI:
         '''
         pass
 
+    @ctypes_param.since('7.10')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_runopts_get_overlapped_sends_count(self, run_options_handle: int):
         '''
@@ -5665,7 +5632,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_CPU_util(self, run_options_handle: int, cpu_util: int):
         '''
         The CHR_runopts_set_CPU_util function sets or changes the option that
@@ -5688,7 +5655,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_collect_TCP_stats(self, run_options_handle: int,
                                           collect_TCP_stats: int):
         '''
@@ -5710,7 +5677,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_allow_pair_reinit(self, run_options_handle: int,
                                           allow_pair_reinit: int):
         '''
@@ -5789,7 +5756,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_allow_pair_reinit_run(self, run_options_handle: int,
                                               allow_pair_reinit: int):
         '''
@@ -5868,7 +5835,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_HW_timestamps(self, run_options_handle: int,
                                       hw_timestamps: int):
         '''
@@ -5894,7 +5861,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_fewer_setup_connections(self, run_options_handle: int,
                                                 fewer_connections: int):
         '''
@@ -5922,7 +5889,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_apply_dod_only(self, run_options_handle: int,
                                        ep_dod_only: int):
         '''
@@ -5952,7 +5919,8 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param.since('7.10')
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_deconfigure_ports(self, run_options_handle: int,
                                           flag: int):
         '''
@@ -5977,7 +5945,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char, c_ulong)
+    @ctypes_param(c_ulong, c_byte, c_ulong)
     def CHR_runopts_set_num_result_ranges(self, run_options_handle: int,
                                           result_type: int,
                                           number: int):
@@ -6007,7 +5975,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_poll_endpoints(self, run_options_handle: int,
                                        poll_endpoints: int):
         '''
@@ -6056,7 +6024,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_random_new_seed(self, run_options_handle: int,
                                         random_new_seed: int):
         '''
@@ -6080,7 +6048,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_reporting_type(self, run_options_handle: int,
                                        reporting_type: int):
         '''
@@ -6105,7 +6073,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_poll_retrieving_type(self, run_options_handle: int,
                                              poll_retrieving_type: int):
         '''
@@ -6133,7 +6101,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_reporting_firewall(self, run_options_handle: int,
                                            test_reporting_firewall: int):
         '''
@@ -6157,7 +6125,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char, c_ulong, c_ulong, c_ulong)
+    @ctypes_param(c_ulong, c_byte, c_ulong, c_ulong, c_ulong)
     def CHR_runopts_set_result_range(self, run_options_handle: int,
                                      result_type: int,
                                      index: int,
@@ -6222,7 +6190,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_stop_on_init_failure(self, run_options_handle: int,
                                              stop_on_init_failure: int):
         '''
@@ -6271,7 +6239,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_test_end(self, run_options_handle: int,
                                  test_end: int):
         '''
@@ -6294,7 +6262,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_validate_on_recv(self, run_options_handle: int,
                                          validate_on_recv: int):
         '''
@@ -6317,7 +6285,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_clksync_hardware_ts(self, run_options_handle: int,
                                             clksync_hardware_ts: int):
         '''
@@ -6345,7 +6313,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_runopts_set_clksync_external(self, run_options_handle: int,
                                          clksync_external: int):
         '''
@@ -6473,6 +6441,7 @@ class CHRAPI:
         '''
         pass
 
+    @ctypes_param.since('7.10')
     @ctypes_param(c_ulong, c_ulong)
     def CHR_runopts_set_overlapped_sends_count(self, run_options_handle: int,
                                                value: int):
@@ -6499,6 +6468,8 @@ class CHRAPI:
 
     #  Test Object Functions
     #  (CHR_TEST_HANDLE)
+
+    @ctypes_param.since('7.10')
     @ctypes_param(c_ulong, ParamOut(c_ubyte), ParamOut(c_ubyte))
     def CHR_test_get_grouping(self, test_handle: int):
         '''
@@ -6524,6 +6495,7 @@ class CHRAPI:
         '''
         pass
 
+    @ctypes_param.since('7.10')
     @ctypes_param(c_ulong, c_ubyte)
     def CHR_test_set_grouping_type(self, test_handle: int, grouping_type: int):
         '''
@@ -6547,6 +6519,7 @@ class CHRAPI:
         '''
         pass
 
+    @ctypes_param.since('7.10')
     @ctypes_param(c_ulong, c_ubyte)
     def CHR_test_set_grouping_order(self, test_handle: int,
                                     grouping_order: int):
@@ -6741,7 +6714,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_FILE_PATH))
+    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_FILENAME))
     def CHR_test_get_filename(self, test_handle: int):
         '''
         The CHR_test_get_filename function gets the name of the file from which
@@ -6763,7 +6736,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_test_get_how_ended(self, test_handle: int):
         '''
         The CHR_test_get_how_ended function gets the value indicating how the
@@ -6786,7 +6759,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong)
+    @ctypes_param(c_ulong, ParamOut(tm))
     def CHR_test_get_local_start_time(self, test_handle: int):
         '''
         The CHR_test_get_local_start_time function gets the time the test
@@ -6802,11 +6775,16 @@ class CHRAPI:
         rc : int
             The following return code indicates that the function call was
             successful: CHR_OK.
+        local_start_time : datetime
+            A pointer to the structure of type tm where the test start time is
+            returned.
+            This structure can be used as a parameter to the asctime() C
+            function that converts time to a character string.
 
         '''
         pass
 
-    @ctypes_param(c_ulong)
+    @ctypes_param(c_ulong, ParamOut(tm))
     def CHR_test_get_local_stop_time(self, test_handle: int):
         '''
         The CHR_test_get_local_stop_time function gets the time the test
@@ -6822,6 +6800,11 @@ class CHRAPI:
         rc : int
             The following return code indicates that the function call was
             successful: CHR_OK.
+        local_stop_time : datetime
+            A pointer to the structure of type tm where the test start time is
+            returned.
+            This structure can be used as a parameter to the asctime() C
+            function that converts time to a character string.
 
         '''
         pass
@@ -6947,7 +6930,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong)
+    @ctypes_param(c_ulong, ParamOut(c_time_t))
     def CHR_test_get_start_time(self, test_handle: int):
         '''
         The CHR_test_get_start_time function gets the time the test started.
@@ -6962,11 +6945,18 @@ class CHRAPI:
         rc : int
             The following return code indicates that the function call was
             successful: CHR_OK.
-
+        start_time : int
+            A pointer to the variable where the start time is returned.
+            Time is returned as the number of seconds since midnight,
+            January 1, 1970 (that is, a "ctime" value).
+        *NOTE: The "ctime" value can vary depending upon the compiler you use.
+            If you are using a compiler other than the IBM VisualAge for C++
+            compiler, we recommend you use CHR_test_get_local_stop_time() to
+            obtain the correct local time.
         '''
         pass
 
-    @ctypes_param(c_ulong)
+    @ctypes_param(c_ulong, ParamOut(c_time_t))
     def CHR_test_get_stop_time(self, test_handle: int):
         '''
         The CHR_test_get_stop_time function gets the time the test stopped.
@@ -6981,11 +6971,19 @@ class CHRAPI:
         rc : int
             The following return code indicates that the function call was
             successful: CHR_OK.
+        stop_time : int
+            A pointer to the variable where the start time is returned.
+            Time is returned as the number of seconds since midnight,
+            January 1, 1970 (that is, a "ctime" value).
+        *NOTE: The "ctime" value can vary depending upon the compiler you use.
+            If you are using a compiler other than the IBM VisualAge for C++
+            compiler, we recommend you use CHR_test_get_local_stop_time() to
+            obtain the correct local time.
 
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_test_get_throughput_units(self, test_handle: int):
         '''
         The function CHR_test_get_throughput_units gets the throughput units
@@ -7127,7 +7125,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_test_set_throughput_units(self, test_handle: int,
                                       throughput_units: int):
         '''
@@ -7343,11 +7341,10 @@ class CHRAPI:
     #  These are Ixia hardware specfic functions to
     #  manipulate the stack manager configuration in the
     #  file.
-    @ctypes_param(c_ulong, bytes, c_ulong, c_ulong, c_longlong)
+    @ctypes_param(c_ulong, ParamIn(bytes), c_ulong, c_longlong)
     def CHR_test_set_test_server_session(self,
                                          test_handle: int,
                                          test_server_address: str,
-                                         test_server_size: int,
                                          test_server_port: int,
                                          session_object_id: int):
         '''
@@ -7377,7 +7374,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(bytes), ParamOut(c_ulong),
+    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_ADDR), ParamOut(c_ulong),
                   ParamOut(c_longlong))
     def CHR_test_get_test_server_session(self, test_handle: int):
         '''
@@ -7404,7 +7401,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamIn(bytes))
+    @ctypes_param(c_ulong, ParamIn(bytes, cast_type=c_ubyte_p))
     def CHR_test_set_ixia_network_configuration(self, test_handle: int,
                                                 data_ptr: str):
         '''
@@ -7429,7 +7426,8 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(bytes))
+    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_CFG_PARM,
+                                    cast_type=c_ubyte_p))
     def CHR_test_get_ixia_network_configuration(self, test_handle: int):
         '''
         The CHR_test_get_ixia_network_configuration function gets the Ixia port
@@ -7724,7 +7722,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char, c_ulong, ParamOut(c_ulong))
+    @ctypes_param(c_ulong, c_byte, c_ulong, ParamOut(c_ulong))
     def CHR_timingrec_get_result_frequency(self,
                                            timingrec_handle: int,
                                            result_type: int,
@@ -7910,6 +7908,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_timingrec_get_report_group_id(self, i_record_handle: int):
         '''
@@ -8066,7 +8065,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_tracert_pair_get_resolve_hop_name(self, pair_handle: int):
         '''
         The CHR_tracert_pair_get_resolve_hop_name function determines whether
@@ -8088,7 +8087,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_tracert_pair_get_runStatus(self, pair_handle: int):
         '''
         The CHR_tracert_pair_get_runStatus function gets the status of a
@@ -8291,7 +8290,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_tracert_pair_set_resolve_hop_name(self,
                                               pair_handle: int,
                                               resolve_name: int):
@@ -8362,7 +8361,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_voip_pair_get_codec(self, pair_handle: int):
         '''
         The CHR_voip_pair_get_codec function gets the codec type for the given
@@ -8384,7 +8383,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_voip_pair_set_codec(self, pair_handle: int, codec: int):
         '''
         The CHR_voip_pair_set_codec function sets or changes the codec for the
@@ -8557,7 +8556,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(bytes))
+    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_RETURN_MSG))
     def CHR_voip_pair_get_initial_delay(self, pair_handle: int):
         '''
         The CHR_voip_pair_get_initial_delay function gets the delay before the
@@ -8580,8 +8579,8 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(bytes))
-    def CHR_voip_pair_set_initial_delay(self, pair_handle: int):
+    @ctypes_param(c_ulong, ParamIn(bytes))
+    def CHR_voip_pair_set_initial_delay(self, pair_handle: int, delay: str):
         '''
         The CHR_voip_pair_set_initial_delay function sets or changes the delay
         before the first voice data traffic is transmitted in the voice over IP
@@ -8592,15 +8591,16 @@ class CHRAPI:
         ----------
         pair_handle : int
             A handle returned by CHR_voip_pair_new() or CHR_test_get_pair().
+        delay : str
+            Specifies the initial delay distribution. Valid values are in the
+            form of "d[x,y]", where:
 
         Returns
         -------
         rc : int
             The following return code indicates that the function call was
             successful: CHR_OK.
-        delay : str
-            Specifies the initial delay distribution. Valid values are in the
-            form of "d[x,y]", where:
+
         '''
         pass
 
@@ -8801,7 +8801,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_voip_pair_get_use_PLC(self, pair_handle: int):
         '''
         The CHR_voip_pair_get_use_PLC  function gets the value of the use_PLC
@@ -8823,7 +8823,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_voip_pair_set_use_PLC(self, pair_handle: int, use: int):
         '''
         The CHR_voip_pair_set_use_PLC function allows you to emulate packet
@@ -8848,7 +8848,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_voip_pair_get_use_silence_sup(self, pair_handle: int):
         '''
         The CHR_voip_pair_get_use_silence_sup  function gets the value of the
@@ -8871,7 +8871,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_voip_pair_set_use_silence_sup(self, pair_handle: int, use: int):
         '''
         The CHR_voip_pair_set_use_silence_sup function sets or changes whether
@@ -8945,7 +8945,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamIn(bytes), ParamOut(c_ulong), ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamIn(bytes), ParamOut(c_ulong), ParamOut(c_byte))
     def CHR_voip_pair_get_payload_file(self,
                                        pair_handle: int,
                                        filename: str):
@@ -8977,7 +8977,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamIn(bytes), c_char)
+    @ctypes_param(c_ulong, ParamIn(bytes), c_byte)
     def CHR_voip_pair_set_payload_file(self,
                                        pair_handle: int,
                                        filename: str,
@@ -9052,7 +9052,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_video_pair_get_codec(self, pair_handle: int):
         '''
         The CHR_video_pair_get_codec function gets the codec defined for the
@@ -9074,7 +9074,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_video_pair_set_codec(self, pair_handle: int, codec: int):
         '''
         The CHR_video_pair_set_codec function sets or changes the codec for the
@@ -9140,7 +9140,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(bytes))
+    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_RETURN_MSG))
     def CHR_video_pair_get_initial_delay(self, pair_handle: int):
         '''
         The CHR_video_pair_get_initial_delay function gets the value of the
@@ -9375,7 +9375,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_double), ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_double), ParamOut(c_byte))
     def CHR_video_pair_get_bitrate(self, pair_handle: int):
         '''
         The CHR_video_pair_get_bitrate function gets the bitrate value and unit
@@ -9400,7 +9400,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_double, c_char)
+    @ctypes_param(c_ulong, c_double, c_byte)
     def CHR_video_pair_set_bitrate(self, pair_handle: int, bitrate: float,
                                    rate_um: int):
         '''
@@ -9544,7 +9544,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_video_mgroup_get_codec(self, mgroup_handle: int):
         '''
         The CHR_video_mgroup_get_codec function gets the codec defined for the
@@ -9567,7 +9567,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_video_mgroup_set_codec(self, mgroup_handle: int, codec: int):
         '''
         The CHR_video_mgroup_set_codec function sets or changes the codec for
@@ -9590,7 +9590,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(bytes))
+    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_RETURN_MSG))
     def CHR_video_mgroup_get_initial_delay(self, mgroup_handle: int):
         '''
         CHR_video_mgroup_get_initial_delay
@@ -9831,7 +9831,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_double), ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_double), ParamOut(c_byte))
     def CHR_video_mgroup_get_bitrate(self, mgroup_handle: int):
         '''
         The CHR_video_mgroup_get_bitrate function gets the bitrate value and
@@ -9857,7 +9857,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_double, c_char)
+    @ctypes_param(c_ulong, c_double, c_byte)
     def CHR_video_mgroup_set_bitrate(self, mgroup_handle: int,
                                      bitrate: float, rate_um: int):
         '''
@@ -10040,7 +10040,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_hardware_pair_get_override_line_rate(self, pair_handle: int):
         '''
         The CHR_hardware_pair_get_override_line_rate function gets the setting
@@ -10064,7 +10064,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_hardware_pair_set_override_line_rate(self, pair_handle: int,
                                                  override_line_rate: int):
         '''
@@ -10113,7 +10113,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_hardware_pair_set_measure_statistics(self, pair_handle: int,
                                                  measure_statistics: int):
         '''
@@ -10139,7 +10139,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_hardware_pair_get_measure_statistics(self, pair_handle: int):
         '''
         The CHR_hardware_pair_get_measure_statistics function gets the flag
@@ -10194,9 +10194,11 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong)
-    def CHR_hardware_voip_pair_set_concurrent_voice_streams(self,
-                                                            pair_handle: int):
+    @ctypes_param(c_ulong, c_int)
+    def CHR_hardware_voip_pair_set_concurrent_voice_streams(
+            self,
+            pair_handle: int,
+            concurrent_voice_streams: int):
         '''
         CHR_hardware_voip_pair_set_concurrent_voice_streams
 
@@ -10214,7 +10216,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong)
+    @ctypes_param(c_ulong, ParamOut(c_int))
     def CHR_hardware_voip_pair_get_concurrent_voice_streams(self,
                                                             pair_handle: int):
         '''
@@ -10290,7 +10292,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_FILE_PATH))
+    @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_FILENAME))
     def CHR_app_group_get_filename(self, app_group_handle: int):
         '''
         The CHR_app_group_get_filename function gets the name of the file from
@@ -10720,7 +10722,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_ulong, c_char)
+    @ctypes_param(c_ulong, c_ulong, c_byte)
     def CHR_app_group_set_pair_protocol(self, app_group_handle: int,
                                         pair_index: int, protocol: int):
         '''
@@ -10750,7 +10752,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, c_ulong, ParamOut(c_byte))
     def CHR_app_group_get_pair_protocol(self, app_group_handle: int,
                                         pair_index: int):
         '''
@@ -10780,7 +10782,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_ulong, c_char)
+    @ctypes_param(c_ulong, c_ulong, c_byte)
     def CHR_app_group_set_pair_management_protocol(self,
                                                    app_group_handle: int,
                                                    pair_index: int,
@@ -10812,7 +10814,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, c_ulong, ParamOut(c_byte))
     def CHR_app_group_get_pair_management_protocol(self,
                                                    app_group_handle: int,
                                                    pair_index: int):
@@ -11081,7 +11083,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_app_group_set_lock(self, app_group_handle: int, lock: int):
         '''
         The CHR_app_group_set_lock  function takes one of the following
@@ -11106,7 +11108,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_app_group_get_lock(self, app_group_handle: int):
         '''
         The function CHR_app_group_get_lock returns a Boolean value that
@@ -11134,7 +11136,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_app_group_is_disabled(self, app_group_handle: int):
         '''
         The CHR_app_group_is_disabled function determines whether or not the
@@ -11159,7 +11161,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_app_group_disable(self, app_group_handle: int, disable: int):
         '''
         The CHR_app_group_disable function disables or enables all of the pairs
@@ -11221,6 +11223,7 @@ class CHRAPI:
     #  - CHR_OBJECT_IN_USE
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong)
     def CHR_channel_delete(self, i_channel_handle: int):
         '''
@@ -11257,7 +11260,8 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong, ParamOut(c_double), ParamOut(c_char))
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, ParamOut(c_double), ParamOut(c_byte))
     def CHR_channel_get_bitrate(self, i_channel_handle: int):
         '''
         The CHR_channel_get_bitrate function gets the bit rate value and unit
@@ -11297,7 +11301,8 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_channel_get_codec(self, i_channel_handle: int):
         '''
         The CHR_channel_get_codec function returns the codec type defined for
@@ -11335,6 +11340,7 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_CHANNEL_COMMENT))
     def CHR_channel_get_comment(self, i_channel_handle: int):
         '''
@@ -11371,6 +11377,7 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_channel_get_conn_send_buff_size(self, i_channel_handle: int):
         '''
@@ -11414,6 +11421,7 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_ADDR))
     def CHR_channel_get_console_e1_addr(self, i_channel_handle: int):
         '''
@@ -11450,7 +11458,8 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_channel_get_console_e1_protocol(self, i_channel_handle: int):
         '''
         The CHR_channel_get_console_e1_protocol function returns the network
@@ -11490,6 +11499,7 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_ADDR))
     def CHR_channel_get_e1_addr(self, i_channel_handle: int):
         '''
@@ -11526,6 +11536,7 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_channel_get_frames_per_datagram(self, i_channel_handle: int):
         '''
@@ -11561,6 +11572,7 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_channel_get_media_frame_size(self, i_channel_handle: int):
         '''
@@ -11599,6 +11611,7 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_MULTICAST_ADDR))
     def CHR_channel_get_multicast_addr(self, i_channel_handle: int):
         '''
@@ -11633,6 +11646,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ushort))
     def CHR_channel_get_multicast_port(self, i_channel_handle: int):
         '''
@@ -11671,6 +11685,7 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_CHANNEL_NAME))
     def CHR_channel_get_name(self, i_channel_handle: int):
         '''
@@ -11705,7 +11720,8 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_channel_get_protocol(self, i_channel_handle: int):
         '''
         The CHR_channel_get_protocol function returns the test protocol of the
@@ -11744,6 +11760,7 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_QOS_NAME))
     def CHR_channel_get_qos_name(self, i_channel_handle: int):
         '''
@@ -11781,7 +11798,8 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong)
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, ParamOut(c_ubyte))
     def CHR_channel_get_rtp_payload_type(self, i_channel_handle: int):
         '''
         The CHR_channel_get_rtp_payload_type function returns the RTP payload
@@ -11816,6 +11834,7 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ushort))
     def CHR_channel_get_source_port_num(self, i_channel_handle: int):
         '''
@@ -11854,7 +11873,8 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_channel_get_use_console_e1_values(self, i_channel_handle: int):
         '''
         The CHR_channel_get_use_console_e1_values function indicates whether
@@ -11895,6 +11915,7 @@ class CHRAPI:
     #  - CHR_POINTER_INVALID
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(ParamOut(c_ulong))
     def CHR_channel_new(self):
         '''
@@ -11932,7 +11953,8 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong, c_double, c_char)
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, c_double, c_byte)
     def CHR_channel_set_bitrate(self, i_channel_handle: int,
                                 i_bitrate: float,
                                 i_units: int):
@@ -11976,7 +11998,8 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, c_byte)
     def CHR_channel_set_codec(self, i_channel_handle: int, i_video_codec: int):
         '''
         The CHR_channel_set_codec function specifies the type of codec for the
@@ -12018,6 +12041,7 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamIn(bytes))
     def CHR_channel_set_comment(self, i_channel_handle: int, i_comment: str):
         '''
@@ -12101,6 +12125,7 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamIn(bytes))
     def CHR_channel_set_console_e1_addr(self, i_channel_handle: int,
                                         i_mgmt_addr: str):
@@ -12144,7 +12169,8 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, c_byte)
     def CHR_channel_set_console_e1_protocol(self, i_channel_handle: int,
                                             i_protocol: int):
         '''
@@ -12188,6 +12214,7 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamIn(bytes))
     def CHR_channel_set_e1_addr(self, i_channel_handle: int, i_address: str):
         '''
@@ -12227,6 +12254,7 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong)
     def CHR_channel_set_frames_per_datagram(self, i_channel_handle: int,
                                             i_frames: int):
@@ -12266,6 +12294,7 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong)
     def CHR_channel_set_media_frame_size(self, i_channel_handle: int,
                                          i_frame_size: int):
@@ -12308,6 +12337,7 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamIn(bytes))
     def CHR_channel_set_multicast_addr(self, i_channel_handle: int,
                                        i_multicast_addr: str):
@@ -12349,6 +12379,7 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ushort)
     def CHR_channel_set_multicast_port(self, i_channel_handle: int,
                                        i_multicast_port: int):
@@ -12391,6 +12422,7 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamIn(bytes))
     def CHR_channel_set_name(self, i_channel_handle: int, i_name: str):
         '''
@@ -12429,7 +12461,8 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, c_byte)
     def CHR_channel_set_protocol(self, i_channel_handle: int, i_protocol: int):
         '''
         The CHR_channel_set_protocol function specifies the test protocol of
@@ -12471,6 +12504,7 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamIn(bytes))
     def CHR_channel_set_qos_name(self, i_channel_handle: int, i_qos_name: str):
         '''
@@ -12514,6 +12548,7 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ubyte)
     def CHR_channel_set_rtp_payload_type(self, i_channel_handle: int,
                                          i_payload_type: int):
@@ -12553,6 +12588,7 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ushort)
     def CHR_channel_set_source_port_num(self, i_channel_handle: int,
                                         i_source_port: int):
@@ -12594,7 +12630,8 @@ class CHRAPI:
     #  - CHR_TEST_RUNNING
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, c_byte)
     def CHR_channel_set_use_console_e1_values(self, i_channel_handle: int,
                                               i_use_values: int):
         '''
@@ -12628,7 +12665,8 @@ class CHRAPI:
     #                           unlocked.
     #
     #  @since IxChariot 6.70
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param.since('6.70')
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_channel_get_lock(self, i_channel_handle: int):
         '''
         The CHR_channel_get_lock function returns a Boolean value that
@@ -12660,7 +12698,8 @@ class CHRAPI:
     #                           unlock.
     #
     #  @since IxChariot 6.70
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param.since('6.70')
+    @ctypes_param(c_ulong, c_byte)
     def CHR_channel_set_lock(self, i_channel_handle: int, i_use_values: int):
         '''
         The CHR_channel_set_lock function locks or unlocks the channel object.
@@ -12758,6 +12797,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong)
     def CHR_receiver_delete(self, i_receiver_handle: int):
         '''
@@ -12789,6 +12829,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_RECEIVER_COMMENT))
     def CHR_receiver_get_comment(self, i_receiver_handle: int):
         '''
@@ -12819,6 +12860,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_receiver_get_conn_recv_buff_size(self, i_receiver_handle: int):
         '''
@@ -12853,6 +12895,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_ADDR))
     def CHR_receiver_get_e2_addr(self, i_receiver_handle: int):
         '''
@@ -12885,6 +12928,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_RECEIVER_NAME))
     def CHR_receiver_get_name(self, i_receiver_handle: int):
         '''
@@ -12915,6 +12959,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_receiver_get_no_of_iterations(self, i_receiver_handle: int):
         '''
@@ -12949,6 +12994,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong, ParamOut(c_ulong))
     def CHR_receiver_get_vpair(self, i_receiver_handle: int,
                                i_pair_index: int):
@@ -12985,6 +13031,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_receiver_get_vpair_count(self, i_receiver_handle: int):
         '''
@@ -13018,6 +13065,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(bytes, CHR_MAX_ADDR))
     def CHR_receiver_get_setup_e1_e2_addr(self, i_receiver_handle: int):
         '''
@@ -13049,6 +13097,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_receiver_get_switch_delay(self, i_receiver_handle: int):
         '''
@@ -13083,7 +13132,8 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_receiver_get_use_e1_e2_values(self, i_receiver_handle: int):
         '''
         The CHR_receiver_get_use_e1_e2_values function indicates whether
@@ -13107,7 +13157,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_receiver_is_disabled(self, i_receiver_handle: int):
         '''
         The CHR_receiver_is_disabled function determines whether or not the
@@ -13141,6 +13191,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(ParamOut(c_ulong))
     def CHR_receiver_new(self):
         '''
@@ -13169,6 +13220,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamIn(bytes))
     def CHR_receiver_set_comment(self, i_receiver_handle: int, i_comment: str):
         '''
@@ -13200,6 +13252,7 @@ class CHRAPI:
     #  @return Chaript API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong)
     def CHR_receiver_set_conn_recv_buff_size(self, i_receiver_handle: int,
                                              i_buffer_size: int):
@@ -13238,6 +13291,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamIn(bytes))
     def CHR_receiver_set_e2_addr(self, i_receiver_handle: int, i_address: str):
         '''
@@ -13270,6 +13324,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamIn(bytes))
     def CHR_receiver_set_name(self, i_receiver_handle: int, i_name: str):
         '''
@@ -13301,6 +13356,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong)
     def CHR_receiver_set_no_of_iterations(self, i_receiver_handle: int,
                                           i_iterations: int):
@@ -13334,6 +13390,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamIn(bytes))
     def CHR_receiver_set_setup_e1_e2_addr(self, i_receiver_handle: int,
                                           i_address: str):
@@ -13367,6 +13424,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong)
     def CHR_receiver_set_switch_delay(self, i_receiver_handle: int,
                                       i_switch_delay: int):
@@ -13401,7 +13459,8 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, c_byte)
     def CHR_receiver_set_use_e1_e2_values(self, i_receiver_handle: int,
                                           i_use_values: int):
         '''
@@ -13430,7 +13489,7 @@ class CHRAPI:
         '''
         pass
 
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param(c_ulong, c_byte)
     def CHR_receiver_disable(self, i_receiver_handle: int, i_disable: int):
         '''
         The CHR_receiver_disable function disables or enables all of the pairs
@@ -13467,7 +13526,8 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param.since('6.50')
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_report_get_item_type(self, i_report_handle: int):
         '''
         The CHR_report_get_item_type function returns the type of the specified
@@ -13496,6 +13556,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_double))
     def CHR_report_get_join_latency(self, i_report_handle: int):
         '''
@@ -13526,6 +13587,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_double))
     def CHR_report_get_leave_latency(self, i_report_handle: int):
         '''
@@ -13556,6 +13618,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_report_get_report_group_id(self, i_report_handle: int):
         '''
@@ -13586,7 +13649,8 @@ class CHRAPI:
     #                           unlocked.
     #
     #  @since IxChariot 6.70
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param.since('6.70')
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_receiver_get_lock(self, i_receiver_handle: int):
         '''
         The CHR_receiver_get_lock function returns a Boolean value that
@@ -13619,7 +13683,8 @@ class CHRAPI:
     #                           unlock.
     #
     #  @since IxChariot 6.70
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param.since('6.70')
+    @ctypes_param(c_ulong, c_byte)
     def CHR_receiver_set_lock(self, i_receiver_handle: int, i_use_values: int):
         '''
         The CHR_receiver_set_lock function locks or unlocks the receiver
@@ -13657,6 +13722,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong)
     def CHR_test_add_channel(self, i_test_handle: int,
                              i_channel_handle: int):
@@ -13689,6 +13755,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.70
+    @ctypes_param.since('6.70')
     @ctypes_param(c_ulong, c_ulong)
     def CHR_test_remove_channel(self, i_test_handle: int,
                                 i_channel_handle: int):
@@ -13723,6 +13790,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong)
     def CHR_test_add_receiver(self, i_test_handle: int,
                               i_receiver_handle: int):
@@ -13755,6 +13823,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.70
+    @ctypes_param.since('6.70')
     @ctypes_param(c_ulong, c_ulong)
     def CHR_test_remove_receiver(self, i_test_handle: int,
                                  i_receiver_handle: int):
@@ -13789,6 +13858,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong, ParamOut(c_ulong))
     def CHR_test_get_channel(self, i_test_handle: int, i_list_index: int):
         '''
@@ -13826,6 +13896,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamIn(bytes), ParamOut(c_ulong))
     def CHR_test_get_channel_by_name(self, i_test_handle: int,
                                      i_channel_name: str):
@@ -13861,6 +13932,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_test_get_channel_count(self, i_test_handle: int):
         '''
@@ -13893,6 +13965,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong, ParamOut(c_ulong))
     def CHR_test_get_receiver(self, i_test_handle: int, i_list_index: int):
         '''
@@ -13928,6 +14001,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamIn(bytes), ParamOut(c_ulong))
     def CHR_test_get_receiver_by_name(self,
                                       i_test_handle: int,
@@ -13962,6 +14036,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_test_get_receiver_count(self, i_test_handle: int):
         '''
@@ -13996,6 +14071,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong)
     def CHR_vpair_delete(self, i_pair_handle: int):
         '''
@@ -14024,6 +14100,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_vpair_get_channel(self, i_pair_handle: int):
         '''
@@ -14055,6 +14132,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_vpair_get_no_of_timing_records(self, i_pair_handle: int):
         '''
@@ -14089,6 +14167,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong, ParamOut(c_ulong))
     def CHR_vpair_get_report(self, i_pair_handle: int, i_report_index: int):
         '''
@@ -14124,6 +14203,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_vpair_get_report_count(self, i_pair_handle: int):
         '''
@@ -14155,6 +14235,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong, ParamOut(c_ulong))
     def CHR_vpair_get_timing_record(self, i_pair_handle: int,
                                     i_record_index: int):
@@ -14191,6 +14272,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_vpair_get_timing_record_count(self, i_pair_handle: int):
         '''
@@ -14222,6 +14304,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, ParamOut(c_ulong))
     def CHR_vpair_get_tr_duration(self, i_pair_handle: int):
         '''
@@ -14253,6 +14336,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(ParamOut(c_ulong))
     def CHR_vpair_new(self):
         '''
@@ -14279,6 +14363,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong)
     def CHR_vpair_set_no_of_timing_records(self, i_pair_handle: int,
                                            i_count: int):
@@ -14311,6 +14396,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong)
     def CHR_vpair_set_channel(self, i_pair_handle: int, i_channel_handle: int):
         '''
@@ -14342,6 +14428,7 @@ class CHRAPI:
     #  @return Chariot API return code.
     #
     #  @since IxChariot 6.50
+    @ctypes_param.since('6.50')
     @ctypes_param(c_ulong, c_ulong)
     def CHR_vpair_set_tr_duration(self, i_pair_handle: int, i_duration: int):
         '''
@@ -14370,7 +14457,7 @@ class CHRAPI:
     #  @param runStatus         Runstatus to be filled in.
     #
     #  @return Chariot API return code.
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_vpair_get_runStatus(self, i_pair_handle: int):
         '''
         The CHR_vpair_get_runStatus function returns the run status for this
@@ -14418,7 +14505,8 @@ class CHRAPI:
     #                           unlocked.
     #
     #  @since IxChariot 6.70
-    @ctypes_param(c_ulong, ParamOut(c_char))
+    @ctypes_param.since('6.70')
+    @ctypes_param(c_ulong, ParamOut(c_byte))
     def CHR_vpair_get_lock(self, i_pair_handle: int):
         '''
         The CHR_vpair_get_lock function returns a Boolean value that specifies
@@ -14448,7 +14536,8 @@ class CHRAPI:
     #                           unlock.
     #
     #  @since IxChariot 6.70
-    @ctypes_param(c_ulong, c_char)
+    @ctypes_param.since('6.70')
+    @ctypes_param(c_ulong, c_byte)
     def CHR_vpair_set_lock(self, i_pair_handle: int, i_use_values: int):
         '''
         The CHR_vpair_set_lock function locks or unlocks the IPTV pair
@@ -14473,3 +14562,13 @@ class CHRAPI:
             successful: CHR_OK.
         '''
         pass
+
+
+class LocalCHRAPI(CHRAPI):
+    def __init__(self):
+        path = WinTools.get_chrapi_dir()
+        version = WinTools.get_install_version()
+        if path is None:
+            raise FileNotFoundError(
+                "Can't find Ixia ixChariot C API file ChrApi.dll")
+        super().__init__(path, version)

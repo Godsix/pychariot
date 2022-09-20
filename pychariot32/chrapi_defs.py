@@ -31,7 +31,8 @@ Ixia's Chariot application programming interface.
  ***************************************************************/
 @author: haoyue
 """
-
+from datetime import datetime
+from ctypes import Structure, POINTER, c_ssize_t, c_int, c_char, c_ubyte
 from .voip_defs import (
     IX_VOIP_CODEC_NONE, IX_VOIP_CODEC_G711u, IX_VOIP_CODEC_G723_1A,
     IX_VOIP_CODEC_G723_1M, IX_VOIP_CODEC_G729, IX_VOIP_CODEC_G711a,
@@ -125,6 +126,10 @@ CHR_MAX_RECEIVER_NAME                                       = 33
 CHR_MAX_CHANNEL_COMMENT                                     = 65
 CHR_MAX_RECEIVER_COMMENT                                    = 65
 CHR_SOCKET_BUFFER_DEFAULT                                   = 2147483647
+
+
+CHR_ADDR_STRING = c_char * CHR_MAX_ADDR_STRING
+
 
 ###
 CHR_NULL_HANDLE                                             = 0
@@ -342,7 +347,7 @@ CHR_LICENSE_TYPE_FLOATING_BORROW                            = 4
 CHR_REPORT_ITEM_JOIN_LEAVE                                  = 1 # Join/leave latencies.
 
 # ----------------------------------------------------------------------
-#                   CHR_GROUPING_TYPE                                   
+#                   CHR_GROUPING_TYPE
 # ----------------------------------------------------------------------
 # CHR_GROUPING_TYPE
 CHR_GROUPING_TYPE_NO_GROUPING                               = 1
@@ -364,3 +369,29 @@ CHR_GROUPING_TYPE_E2_SERVICE_QUALITY                        = 14
 # CHR_SORT_ORDER
 CHR_SORT_ORDER_ASCENDING                                    = 1
 CHR_SORT_ORDER_DESCENDING                                   = 2
+
+
+
+class tm(Structure):
+    _fields_ = [
+        # seconds after the minute - [0, 60] including leap second
+        ("tm_sec", c_int),
+        ("tm_min", c_int),   # minutes after the hour - [0, 59]
+        ("tm_hour", c_int),   # hours since midnight - [0, 23]
+        ("tm_mday", c_int),   # day of the month - [1, 31]
+        ("tm_mon", c_int),   # months since January - [0, 11]
+        ("tm_year", c_int),   # years since 1900
+        ("tm_wday", c_int),   # days since Sunday - [0, 6]
+        ("tm_yday", c_int),   # days since January 1 - [0, 365]
+        ("tm_isdst", c_int)  # daylight savings time flag
+    ]
+
+    @property
+    def value(self):
+        return datetime(self.tm_year + 1900, self.tm_mon + 1,
+                        max(1, self.tm_mday), self.tm_hour,
+                        self.tm_min, self.tm_sec)
+
+
+c_time_t = c_ssize_t
+c_ubyte_p = POINTER(c_ubyte)

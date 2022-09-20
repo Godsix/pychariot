@@ -27,6 +27,7 @@ from .chrapi_defs import (CHR_MAX_FILENAME, CHR_MAX_FILE_PATH,
                           CHR_BUFFER_TOO_SMALL,
                           tm, c_time_t, c_ubyte_p)
 from .common import CHRDecorator, ParamOut, ParamIn, ParamInOut
+from .utils import WinTools
 
 
 CHR_API_VERSION = (7, 10, 4)
@@ -14561,3 +14562,13 @@ class CHRAPI:
             successful: CHR_OK.
         '''
         pass
+
+
+class LocalCHRAPI(CHRAPI):
+    def __init__(self):
+        path = WinTools.get_chrapi_dir()
+        version = WinTools.get_install_version()
+        if path is None:
+            raise FileNotFoundError(
+                "Can't find Ixia ixChariot C API file ChrApi.dll")
+        super().__init__(path, version)

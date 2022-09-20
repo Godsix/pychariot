@@ -4,18 +4,17 @@ Created on Thu Apr  1 08:51:27 2021
 
 @author: 皓
 """
-import os
+import sys
 import os.path as osp
+import logging
 from glob import glob
 from enum import IntEnum
 from platform import architecture
 from functools import lru_cache
-from winreg import (HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY, KEY_READ,
-                    OpenKey, QueryValueEx)
 from .const import RetureCode, CHR_DETAIL_LEVEL, CHR_NULL_HANDLE
 
 
-CHARIOT_VERSION = (0, 2, 6)
+CHARIOT_VERSION = (0, 3, 0)
 
 
 def chr_api_wrapper(self, func):
@@ -41,18 +40,6 @@ def chr_api_wrapper(self, func):
     return wrapper
 
 
-class PrintLogger:
-
-    def info(self, log, *args, **kwargs):
-        print(log % args, **kwargs)
-
-    def error(self, log, *args, **kwargs):
-        print(log % args, **kwargs)
-
-    def debug(self, log, *args, **kwargs):
-        print(log % args, **kwargs)
-
-
 class Status(IntEnum):
     OK = 0
     INIT = 1
@@ -61,22 +48,16 @@ class Status(IntEnum):
 
 
 class Chariot:
-    APINAME = 'ChrApi.dll'
-    REG_KEYS = (r"SOFTWARE\Ixia\IxChariot",
-                r"SOFTWARE\Ixia Communications\IxChariot")
-    # LOG = logging.getLogger()
-
-    def __init__(self, path=None, logger=PrintLogger(), auto=False,
-                 status_callback=None):
-        self.path = path
+    def __init__(self, address=None, status_callback=None):
+        self.logger = logging.getLogger()
+        self.address = address
         self.status_callback = status_callback
         self.status = Status.INIT
         self.rpc = None
         self.chrapi = None
-        self.logger = logger
         self.pairs = []
-        if auto:
-            self.init_chariot()
+        if address is not None:
+            self.connect(self.address)
 
     @property
     def status(self):
@@ -89,92 +70,97 @@ class Chariot:
             if self.status_callback:
                 self.status_callback(value)
 
-    def init_chariot(self, path=None):
-        self.status = Status.API
-        if path is None:
-            path = self.path
-        valid_path = self.get_chrapi_dir(path)
-        if valid_path is None:
-            raise FileNotFoundError(
-                "Can't find Ixia ixChariot C API file ChrApi.dll")
-        self.install_path = valid_path
-        self.load_api(valid_path)
-
-    @classmethod
-    def get_install_path(cls):
-        for reg_key in cls.REG_KEYS:
-            try:
-                with OpenKey(HKEY_LOCAL_MACHINE, reg_key,
-                             access=KEY_READ | KEY_WOW64_32KEY) as key:
-                    value, *_ = QueryValueEx(key, 'Installation Directory')
-                    return value
-            except FileNotFoundError:
-                pass
-        return None
-
-    @classmethod
-    def get_chrapi_dir(cls, path=None):
-        if path and osp.exists(osp.join(path, cls.APINAME)):
-            return path
-        for item in os.environ.get('PATH').split(';'):
-            if item and osp.exists(osp.join(item, cls.APINAME)):
-                return item
+    def connect(self, address):
+        if address in ('localhost', '127.0.0.1'):
+            arch, ost = architecture()
+            if not ost == 'WindowsPE':
+                raise OSError('The OS must be based on Windows NT.')
+            if arch == '64bit':
+                self.status = Status.RPC
+                self.start_rpc()
+                self.connect_rpcpy32(address)
+                self.status = Status.API
+                self.api = self.chrapi.LocalCHRAPI()
+            else:
+                from . import chrapi
+                self.chrapi = chrapi
+                self.status = Status.API
+                self.api = self.chrapiLocalCHRAPI()
+            self.api_dir.cache_clear()
         else:
-            ixia_path = cls.get_install_path()
-            if ixia_path and osp.exists(osp.join(ixia_path, cls.APINAME)):
-                return ixia_path
-        return None
-
-    @classmethod
-    def get_scripts_path(cls, path=None):
-        path = cls.get_chrapi_dir(path)
-        if not path:
-            return None
-        script_path = osp.join(path, 'Scripts')
-        return script_path
+            self.status = Status.API
+            self.connect_rpc(address)
+            self.api = self.chrapi.LocalCHRAPI()
+        self.status = Status.OK
 
     def start_rpc(self):
         if self.chrapi is not None:
             return
         self.restart_rpc()
 
+    def get_pychariot32_path(self):
+        whls = glob(osp.join(osp.dirname(__file__), '*.whl'))
+        if whls:
+            return whls[0]
+
     def restart_rpc(self):
         import rpcpy32
-        import rpyc
         self.stop_rpc()
         self.python = rpcpy32
         self.rpc_server = self.python.RPC_SERVER
         rpc_pip_list = self.rpc_server.pip_list()
         if 'pychariot32' not in rpc_pip_list:
-            dir_path = osp.dirname(__file__)
-            whls = glob(osp.join(dir_path, '*.whl'))
-            if whls:
-                self.rpc_server.pip_install(whls[0])
+            whl = self.get_pychariot32_path()
+            if whl:
+                self.rpc_server.pip_install(whl)
+        else:
+            from .chrapi import CHR_API_VERSION
+            installed = rpc_pip_list['pychariot32']
+            version = '.'.join([str(x) for x in CHR_API_VERSION])
+            if version > installed:
+                whl = self.get_pychariot32_path()
+                if whl:
+                    self.rpc_server.pip_install(whl)
         self.rpc_server.start()
-        self.rpc = rpyc.classic.connect("localhost")
-        self.chrapi = self.rpc.modules.pychariot32
+
+    def connect_rpcpy32(self, address):
+        import rpyc
+        self.rpc = rpyc.classic.connect(address)
+        self.pymodule = self.rpc.modules.pychariot32
+        self.rpc.modules.sys.stdout = sys.stdout
+        self.rpc.modules.sys.stderr = sys.stderr
+        self.chrapi = self.pymodule.chrapi
+
+    def connect_rpc(self, address):
+        import rpyc
+        self.rpc = rpyc.classic.connect(address)
+        self.pymodule = self.rpc.modules.pychariot
+        self.rpc.modules.sys.stdout = sys.stdout
+        self.rpc.modules.sys.stderr = sys.stderr
+        self.chrapi = self.pymodule.chrapi
+
+    def close_rpc(self):
+        if hasattr(self.rpc, 'close'):
+            self.rpc.close()
+        self.clear_attr('rpc')
+
+    def clear_attr(self, name):
+        if not hasattr(self, name):
+            return
+        setattr(self, name, None)
+        try:
+            delattr(self, name)
+        except Exception:
+            pass
 
     def stop_rpc(self):
         if self.rpc is not None:
-            self.chrapi = None
-            self.rpc = None
-            self.rpc_server.stop()
-            self.rpc_server = None
-            self.python = None
-
-    def load_api(self, path):
-        arch, ost = architecture()
-        if not ost == 'WindowsPE':
-            raise OSError('The OS must be based on Windows NT.')
-        if arch == '64bit':
-            self.status = Status.RPC
-            self.start_rpc()
-            self.api = self.chrapi.CHRAPI(path)
-        else:
-            from .chrapi import CHRAPI
-            self.api = CHRAPI(path)
-        self.path = path
-        self.api_dir.cache_clear()
+            self.close_rpc()
+        rpc_server = getattr(self, 'rpc_server', None)
+        if rpc_server is not None:
+            rpc_server.stop()
+        for item in ('chrapi', 'pymodule', 'rpc_server', 'python'):
+            self.clear_attr(item)
 
     def __del__(self):
         self.stop_rpc()
@@ -189,17 +175,18 @@ class Chariot:
     def __getattr__(self, attr):
         classname = self.__class__.__name__
         if attr not in ('_status', 'api'):
-            if attr.startswith('CHR_'):
-                if hasattr(self.api, attr):
-                    return getattr(self.api, attr)
+            if hasattr(self, 'api'):
+                if attr.startswith('CHR_'):
+                    if hasattr(self.api, attr):
+                        return getattr(self.api, attr)
+                    else:
+                        classname = 'CHRAPI'
                 else:
-                    classname = 'CHRAPI'
-            else:
-                chr_name = 'CHR_{}'.format(attr)
-                if hasattr(self.api, chr_name):
-                    func = getattr(self.api, chr_name)
-                    wrapper = chr_api_wrapper(self, func)
-                    return wrapper
+                    chr_name = 'CHR_{}'.format(attr)
+                    if hasattr(self.api, chr_name):
+                        func = getattr(self.api, chr_name)
+                        wrapper = chr_api_wrapper(self, func)
+                        return wrapper
         raise AttributeError(
             "'{}' object has no attribute '{}'".format(classname, attr))
 

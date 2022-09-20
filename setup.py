@@ -99,7 +99,7 @@ setup(
     packages=find_packages(include=['pychariot'],
                            exclude=['*.contrib', '*.docs', '*.tests']),
     install_requires=[
-        'rpyc>=5.0.0;platform_machine=="AMD64"',
+        'rpyc>=5.0.0',
         'rpcpy32>=3.8.0;platform_machine=="AMD64"'
     ],
     platforms="any",
