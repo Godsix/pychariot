@@ -10,22 +10,22 @@ from ctypes import (CDLL, create_string_buffer, create_unicode_buffer, byref,
                     c_ushort, c_char, c_ubyte, c_double, c_longlong)
 from functools import wraps
 import logging
-from .chrapi_constant import (CHR_MAX_FILENAME, CHR_MAX_FILE_PATH,
-                              CHR_MAX_EMBEDDED_PAYLOAD_SIZE,
-                              CHR_MAX_ERROR_INFO, CHR_MAX_PAIR_COMMENT,
-                              CHR_MAX_ADDR, CHR_MAX_MULTICAST_ADDR,
-                              CHR_MAX_QOS_NAME, CHR_MAX_APPL_SCRIPT_NAME,
-                              CHR_MAX_GROUP_NAME, CHR_MAX_VERSION,
-                              CHR_MAX_RETURN_MSG,
-                              CHR_MAX_SCRIPT_VARIABLE_VALUE,
-                              CHR_MAX_CFG_PARM, CHR_MAX_ADDR_STRING,
-                              CHR_BSSID_SIZE, CHR_MAX_APP_GROUP_NAME,
-                              CHR_MAX_APP_GROUP_COMMENT,
-                              CHR_MAX_APP_GROUP_EVENT_NAME,
-                              CHR_MAX_APP_GROUP_EVENT_COMMENT,
-                              CHR_MAX_CHANNEL_NAME, CHR_MAX_RECEIVER_NAME,
-                              CHR_MAX_CHANNEL_COMMENT,
-                              CHR_MAX_RECEIVER_COMMENT)
+from .chrapi_defs import (CHR_MAX_FILENAME, CHR_MAX_FILE_PATH,
+                          CHR_MAX_EMBEDDED_PAYLOAD_SIZE,
+                          CHR_MAX_ERROR_INFO, CHR_MAX_PAIR_COMMENT,
+                          CHR_MAX_ADDR, CHR_MAX_MULTICAST_ADDR,
+                          CHR_MAX_QOS_NAME, CHR_MAX_APPL_SCRIPT_NAME,
+                          CHR_MAX_GROUP_NAME, CHR_MAX_VERSION,
+                          CHR_MAX_RETURN_MSG,
+                          CHR_MAX_SCRIPT_VARIABLE_VALUE,
+                          CHR_MAX_CFG_PARM, CHR_MAX_ADDR_STRING,
+                          CHR_BSSID_SIZE, CHR_MAX_APP_GROUP_NAME,
+                          CHR_MAX_APP_GROUP_COMMENT,
+                          CHR_MAX_APP_GROUP_EVENT_NAME,
+                          CHR_MAX_APP_GROUP_EVENT_COMMENT,
+                          CHR_MAX_CHANNEL_NAME, CHR_MAX_RECEIVER_NAME,
+                          CHR_MAX_CHANNEL_COMMENT,
+                          CHR_MAX_RECEIVER_COMMENT)
 
 
 CHR_API_VERSION = (7, 10, 3)
