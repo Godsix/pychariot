@@ -10,7 +10,7 @@ from winreg import (HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY, KEY_READ,
                     OpenKey, QueryValueEx)
 
 
-class WinTools:
+class ToolKit:
     APINAME = 'ChrApi.dll'
     REG_KEYS = (r"SOFTWARE\Ixia\IxChariot",
                 r"SOFTWARE\Ixia Communications\IxChariot")
@@ -62,8 +62,8 @@ class WinTools:
 
 
 def test():
-    print(WinTools.get_install_path())
-    print(WinTools.get_install_version())
+    print(ToolKit.get_install_path())
+    print(ToolKit.get_install_version())
 
 
 if __name__ == '__main__':

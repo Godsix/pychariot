@@ -9,13 +9,13 @@ import sys
 import platform
 from argparse import ArgumentParser
 from subprocess import call
-from rpcpy32.server import PYTHON
+# from rpcpy32.server import PYTHON
 DIR = osp.dirname(__file__)
 if DIR not in sys.path:
     sys.path.append(DIR)
 
 
-PY32 = PYTHON
+# PY32 = PYTHON
 
 
 def argument_parse():
@@ -44,6 +44,22 @@ def test_chariot():
     print(chariot.api_get_version())
 
 
+def test_new_api():
+    from pychariot32.wrapper import CHR, Test
+    from typing import get_type_hints
+    chariot = CHR()
+    print('-------------------------')
+    print(chariot.initialize(0) == '')
+    print(chariot.get_return_msg(118))
+    print('-------------------------')
+    print(chariot.aptixia_version)
+    print(get_type_hints(chariot.get_pair_type))
+    test = Test()
+    print(test)
+    # print(chariot.build_level, type(chariot.build_level))
+
+
+
 def test_win32():
     arch = platform.architecture()[0]
     if '64bit' == arch:
@@ -58,7 +74,8 @@ def test_win32():
 
 
 def main():
-    test_chariot()
+    # test_chariot()
+    test_new_api()
 
 
 if __name__ == '__main__':

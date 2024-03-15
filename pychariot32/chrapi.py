@@ -27,7 +27,6 @@ from .chrapi_defs import (CHR_MAX_FILENAME, CHR_MAX_FILE_PATH,
                           CHR_BUFFER_TOO_SMALL,
                           tm, c_time_t, c_ubyte_p)
 from .common import CHRDecorator, ParamOut, ParamIn, ParamInOut
-from .utils import WinTools
 
 
 CHR_API_VERSION = (7, 10, 4)
@@ -66,12 +65,10 @@ class CHRAPI:
         ctypes_param.init_cdll(self.dll)
 
     def __getattr__(self, attr):
-        if attr.startswith('CHR'):
-            if hasattr(self.dll, attr):
-                return getattr(self.dll, attr)
-        raise AttributeError(
-            "'{}' object has no attribute '{}'".format(self.__class__.__name__,
-                                                       attr))
+        if attr.startswith('CHR') and hasattr(self.dll, attr):
+            return getattr(self.dll, attr)
+        cls_name = self.__class__.__name__
+        raise AttributeError(f"'{cls_name}' object has no attribute '{attr}'")
 
     def has_func(self, attr):
         return hasattr(self.dll, attr)
@@ -1305,6 +1302,10 @@ class CHRAPI:
         ----------
         handle : int
             One of the following:
+                For an endpoint pair, the handle returned by CHR_pair_new()
+                or CHR_test_get_pair().
+                For a timing record, the handle returned by
+                CHR_pair_get_timing_record().
 
         Returns
         -------
@@ -1328,6 +1329,10 @@ class CHRAPI:
         ----------
         handle : int
             One of the following:
+                For an endpoint pair, the handle returned by CHR_pair_new()
+                or CHR_test_get_pair().
+                For a timing record, the handle returned by
+                CHR_pair_get_timing_record().
 
         Returns
         -------
@@ -1352,6 +1357,10 @@ class CHRAPI:
         ----------
         handle : int
             One of the following:
+                For an endpoint pair, the handle returned by CHR_pair_new()
+                or CHR_test_get_pair().
+                For a timing record, the handle returned by
+                CHR_pair_get_timing_record().
 
         Returns
         -------
@@ -1376,6 +1385,10 @@ class CHRAPI:
         ----------
         handle : int
             One of the following:
+                For an endpoint pair, the handle returned by CHR_pair_new()
+                or CHR_test_get_pair().
+                For a timing record, the handle returned by
+                CHR_pair_get_timing_record().
 
         Returns
         -------
@@ -1399,6 +1412,10 @@ class CHRAPI:
         ----------
         handle : int
             One of the following:
+                For an endpoint pair, the handle returned by CHR_pair_new()
+                or CHR_test_get_pair().
+                For a timing record, the handle returned by
+                CHR_pair_get_timing_record().
 
         Returns
         -------
@@ -1422,6 +1439,10 @@ class CHRAPI:
         ----------
         handle : int
             One of the following:
+                For an endpoint pair, the handle returned by CHR_pair_new()
+                or CHR_test_get_pair().
+                For a timing record, the handle returned by
+                CHR_pair_get_timing_record().
 
         Returns
         -------
@@ -1446,6 +1467,10 @@ class CHRAPI:
         ----------
         handle : int
             One of the following:
+                For an endpoint pair, the handle returned by CHR_pair_new()
+                or CHR_test_get_pair().
+                For a timing record, the handle returned by
+                CHR_pair_get_timing_record().
 
         Returns
         -------
@@ -1471,6 +1496,10 @@ class CHRAPI:
         ----------
         handle : int
             One of the following:
+                For an endpoint pair, the handle returned by CHR_pair_new()
+                or CHR_test_get_pair().
+                For a timing record, the handle returned by
+                CHR_pair_get_timing_record().
 
         Returns
         -------
@@ -1495,6 +1524,10 @@ class CHRAPI:
         ----------
         handle : int
             One of the following:
+                For an endpoint pair, the handle returned by CHR_pair_new()
+                or CHR_test_get_pair().
+                For a timing record, the handle returned by
+                CHR_pair_get_timing_record().
 
         Returns
         -------
@@ -1518,6 +1551,10 @@ class CHRAPI:
         ----------
         handle : int
             One of the following:
+                For an endpoint pair, the handle returned by CHR_pair_new()
+                or CHR_test_get_pair().
+                For a timing record, the handle returned by
+                CHR_pair_get_timing_record().
 
         Returns
         -------
@@ -1567,6 +1604,10 @@ class CHRAPI:
         ----------
         handle : int
             One of the following:
+                For an endpoint pair, the handle returned by CHR_pair_new()
+                or CHR_test_get_pair().
+                For a timing record, the handle returned by
+                CHR_pair_get_timing_record().
 
         Returns
         -------
@@ -7114,7 +7155,7 @@ class CHRAPI:
             Note that once you've set the filename, you can't change it back
             to the loaded filename.
             To reset the filename to the name of the loaded test, use a null
-            filename parameter and a "0" filename length..
+            filename parameter and a "0" filename length.
 
         Returns
         -------
@@ -10591,7 +10632,7 @@ class CHRAPI:
             CHR_test_get_app_group_by_index().
         index : int
             A zero-based index that can take values between 0 and
-            CHR_app_group_get_pair_count()  1. The index  identifies a
+            CHR_app_group_get_pair_count(). The index  identifies a
             specific pair within the application group. For example, if there
             are four pairs in an application group, their index numbers are 0,
             1, 2, and 3.
@@ -14562,13 +14603,3 @@ class CHRAPI:
             successful: CHR_OK.
         '''
         pass
-
-
-class LocalCHRAPI(CHRAPI):
-    def __init__(self):
-        path = WinTools.get_chrapi_dir()
-        version = WinTools.get_install_version()
-        if path is None:
-            raise FileNotFoundError(
-                "Can't find Ixia ixChariot C API file ChrApi.dll")
-        super().__init__(path, version)
