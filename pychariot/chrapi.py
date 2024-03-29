@@ -4,6 +4,7 @@ Created on Wed Feb 10 11:31:50 2021
 
 @author: haoyue
 """
+# pylint: disable=too-many-lines,too-many-public-methods,R0801
 import os.path as osp
 import logging
 from platform import architecture
@@ -6166,6 +6167,7 @@ class CHRAPI:
         '''
         pass
 
+    # pylint: disable=too-many-arguments
     @ctypes_param(c_ulong, c_byte, c_ulong, c_ulong, c_ulong)
     def CHR_runopts_set_result_range(self, run_options_handle: int,
                                      result_type: int,

@@ -43,14 +43,16 @@ class ToolKit:
     def get_chrapi_dir(cls, path=None):
         if path and osp.exists(osp.join(path, cls.APINAME)):
             return path
+        result = None
         for item in os.environ.get('PATH').split(';'):
             if item and osp.exists(osp.join(item, cls.APINAME)):
-                return item
+                result = item
+                break
         else:
             ixia_path = cls.get_install_path()
             if ixia_path and osp.exists(osp.join(ixia_path, cls.APINAME)):
-                return ixia_path
-        return None
+                result = ixia_path
+        return result
 
     @classmethod
     def get_scripts_path(cls, path=None):

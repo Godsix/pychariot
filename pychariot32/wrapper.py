@@ -4,6 +4,7 @@ Created on Wed Mar 13 16:46:43 2024
 
 @author: 皓
 """
+# pylint: disable=too-few-public-methods,too-many-public-methods,too-many-lines,no-else-return,R0801
 from typing import get_type_hints
 from functools import lru_cache, wraps
 from .chrapi import CHRAPI
@@ -40,7 +41,7 @@ def chr_api_wrapper(self, func):
             if len(out) == 1:
                 return out[0]
             return tuple(out)
-        return
+        return None
     return wrapper
 
 
@@ -507,6 +508,9 @@ class HandleCHR(BaseHandleCHR):
             if hasattr(self, 'delete'):
                 self.delete()
             self.handle = None
+
+    def new(self):
+        return 0
 
 
 class IxiaNetworkMixin:
@@ -1139,7 +1143,7 @@ class HardwareVoipPair(HandleCHR):
         pass
 
 
-class AppGroup(BaseCHR):
+class AppGroup(HandleCHR):
     '''
     Application Group Object Functions
     ---------------------------------------------------------------------------

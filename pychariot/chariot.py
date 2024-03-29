@@ -4,6 +4,7 @@ Created on Thu Apr  1 08:51:27 2021
 
 @author: 皓
 """
+# pylint: disable=import-outside-toplevel,too-many-public-methods,too-many-instance-attributes
 import sys
 import os.path as osp
 import logging
@@ -36,7 +37,7 @@ def chr_api_wrapper(self, func):
             if len(out) == 1:
                 return out[0]
             return tuple(out)
-        return
+        return None
     return wrapper
 
 
@@ -53,6 +54,9 @@ class Chariot:
         self.address = address
         self.status_callback = status_callback
         self.status = Status.INIT
+        self.python = None
+        self.rpc_server = None
+        self.pymodule = None
         self.rpc = None
         self.chrapi = None
         self.pairs = []
@@ -102,6 +106,7 @@ class Chariot:
         whls = glob(osp.join(osp.dirname(__file__), '*.whl'))
         if whls:
             return whls[0]
+        return None
 
     def restart_rpc(self):
         import rpcpy32
@@ -150,7 +155,7 @@ class Chariot:
         setattr(self, name, None)
         try:
             delattr(self, name)
-        except Exception:
+        except AttributeError:
             pass
 
     def stop_rpc(self):
@@ -179,16 +184,14 @@ class Chariot:
                 if attr.startswith('CHR_'):
                     if hasattr(self.api, attr):
                         return getattr(self.api, attr)
-                    else:
-                        classname = 'CHRAPI'
+                    classname = 'CHRAPI'
                 else:
-                    chr_name = 'CHR_{}'.format(attr)
+                    chr_name = f'CHR_{attr}'
                     if hasattr(self.api, chr_name):
                         func = getattr(self.api, chr_name)
                         wrapper = chr_api_wrapper(self, func)
                         return wrapper
-        raise AttributeError(
-            "'{}' object has no attribute '{}'".format(classname, attr))
+        raise AttributeError(f"'{classname}' object has no attribute '{attr}'")
 
     def show_error(self, handle, code, where):
         '''转换错误信息'''
@@ -232,18 +235,17 @@ class Chariot:
         self.apply_pair_attr(pair, e1, e2, script, **kwargs)
         return pair
 
+    # pylint: disable=too-many-arguments
     def apply_pair_attr(self, pair, e1, e2, script,
                         protocol=None,
-                        comment=None,
-                        **kwargs):
+                        comment=None):
         self.set_pair_addr(pair, e1, e2)
         if osp.isabs(script):
             script_path = script
         else:
             script_path = osp.join(self.path, 'Scripts', script)
         if not osp.exists(script_path):
-            raise FileNotFoundError(
-                'Script is not fount:{}'.format(script_path))
+            raise FileNotFoundError(f'Script is not fount:{script_path}')
         self.pair_use_script_filename(pair, script_path)
         if comment is not None:
             self.pair_set_comment(pair, comment)

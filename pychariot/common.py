@@ -13,8 +13,11 @@ from ctypes import (CDLL, POINTER, create_string_buffer, create_unicode_buffer,
                     byref, c_int,  c_ulong, c_char_p, c_char, c_wchar,
                     c_wchar_p, cast)
 
-
-ENCODING = locale.getdefaultlocale()[1]
+try:
+    ENCODING = locale.getencoding()
+except AttributeError:
+    # 3.11 deprecated,3.15 remove.Use getencoding() instead.
+    ENCODING = locale.getdefaultlocale()[1]  # pylint: disable=deprecated-method
 
 
 class UnSupportError(Exception):
@@ -26,7 +29,7 @@ class BaseParam:
         self.datatype = self._check_datatype(datatype)
 
     @classmethod
-    def _check_datatype(self, datatype):
+    def _check_datatype(cls, datatype):
         assert isinstance(datatype, type), datatype
         if hasattr(datatype, 'from_param'):
             return datatype
@@ -90,7 +93,7 @@ class BaseOut(BaseParam):
         self.data = None
         self.length = 0
 
-    def get_ctypes(self):
+    def get_ctypes(self):  # pylint: disable=inconsistent-return-statements
         if hasattr(self.datatype, 'from_param'):
             return tuple([POINTER(self.datatype)])
         if issubclass(self.datatype, bytes):
@@ -100,7 +103,7 @@ class BaseOut(BaseParam):
             dtype = self.cast_type if self.cast_type else POINTER(c_wchar)
             return dtype, c_ulong, POINTER(c_ulong)
 
-    def get_result(self):
+    def get_result(self):  # pylint: disable=inconsistent-return-statements
         if issubclass(self.datatype, bytes):
             return self.decode(self.data.value)
         if issubclass(self.datatype, str):
@@ -175,8 +178,8 @@ class CFuncDecorator:
 
     def init_cdll(self, cdll_object):
         assert isinstance(cdll_object, CDLL)
-        dll_name = osp.basename(cdll_object._name)
-        for name, args in self.params.items():
+        dll_name = osp.basename(cdll_object._name)  # pylint: disable=protected-access
+        for name in self.params:
             if hasattr(cdll_object, name):
                 func = getattr(cdll_object, name)
                 restype, *argtypes = self.get_param_ctypes(name)
@@ -185,46 +188,33 @@ class CFuncDecorator:
             else:
                 self.logger.error("%s have no function: %s", dll_name, name)
 
-    def __call__(self, func_name, restype, *argtypes):
-        def decorator(func):
-            self.parse_ctypes(func_name, restype, *argtypes)
-
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                nargs, nkwargs = self.parse_args(*args, **kwargs)
-                result = func(*args, **kwargs)
-                return self.parse_return(result)
-            return wrapper
-        return decorator
-
 
 class CHRDecorator(CFuncDecorator):
     def __init__(self):
-        self.logger = logging.getLogger()
-        self.params = {}
+        super().__init__()
         self.vcontrol = {}
         self.version = None
 
     def check_version(self, name):
         if self.version is None:
-            return
+            return True
         if name not in self.vcontrol:
             return True
-        text, op, ver = self.vcontrol[name]
+        _text, op, ver = self.vcontrol[name]
         if op(self.version, ver):
             return True
         return False
 
     def raise_version(self, name):
         if self.check_version(name) is False:
-            text, op, ver = self.vcontrol[name]
+            text, _op, ver = self.vcontrol[name]
             raise UnSupportError(
                 f'{name} is valid {text} {ver}, current is {self.version}')
 
     def init_cdll(self, cdll_object):
         assert isinstance(cdll_object, CDLL)
-        dll_name = osp.basename(cdll_object._name)
-        for name, args in self.params.items():
+        dll_name = osp.basename(cdll_object._name)  # pylint: disable=protected-access
+        for name in self.params:
             if hasattr(cdll_object, name):
                 func = getattr(cdll_object, name)
                 restype, *argtypes = self.get_param_ctypes(name)

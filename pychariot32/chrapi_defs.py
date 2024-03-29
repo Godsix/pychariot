@@ -31,6 +31,7 @@ Ixia's Chariot application programming interface.
  ***************************************************************/
 @author: haoyue
 """
+# pylint: disable=too-few-public-methods
 from datetime import datetime
 from ctypes import Structure, POINTER, c_ssize_t, c_int, c_char, c_ubyte
 from .voip_defs import (
@@ -101,7 +102,7 @@ CHR_RAVE_MULTI_RUNNING                                      = CHR_RC_BASE + 48
 ### String buffer maximum sizes (including a terminating '\0')
 CHR_MAX_DIR_PATH                                            = 301
 CHR_MAX_FILENAME                                            = 301
-CHR_MAX_FILE_PATH                                           = (CHR_MAX_DIR_PATH + CHR_MAX_FILENAME)
+CHR_MAX_FILE_PATH                                           = CHR_MAX_DIR_PATH + CHR_MAX_FILENAME
 CHR_MAX_EMBEDDED_PAYLOAD_SIZE                               = 27904
 CHR_MAX_ERROR_INFO                                          = 4096
 CHR_MAX_PAIR_COMMENT                                        = 65
@@ -199,8 +200,8 @@ CHR_PORT_AUTO                                               = 0
 # CHR_DETAIL_LEVEL
 CHR_DETAIL_LEVEL_NONE                                       = 0x0000
 CHR_DETAIL_LEVEL_PRIMARY                                    = 0x00a3
-CHR_DETAIL_LEVEL_ADVANCED                                   = (0x0014 | CHR_DETAIL_LEVEL_PRIMARY)
-CHR_DETAIL_LEVEL_ALL                                        = (0x0148 | CHR_DETAIL_LEVEL_ADVANCED)
+CHR_DETAIL_LEVEL_ADVANCED                                   = 0x0014 | CHR_DETAIL_LEVEL_PRIMARY
+CHR_DETAIL_LEVEL_ALL                                        = 0x0148 | CHR_DETAIL_LEVEL_ADVANCED
 
 ### Throughput Units
 # CHR_THROUGHPUT_UNITS
